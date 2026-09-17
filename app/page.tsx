@@ -18,7 +18,7 @@ const THEMES = {
 };
 
 export default function Home() {
-  const [isClient, setIsClient] = useState(false); // 화면 깜빡임 방지용
+  const [isClient, setIsClient] = useState(false);
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -58,37 +58,46 @@ export default function Home() {
 
   const t = THEMES[appMode];
 
-  // 1. 처음 켜질 때 내 기기에 저장된 '카테고리/테마 설정' 불러오기
+  // 1. 처음 켜질 때 DB에서 모든 정보(할 일 + 앱 설정) 불러오기
   useEffect(() => {
     setIsClient(true);
-    const savedMode = localStorage.getItem('todo_appMode');
-    if (savedMode) setAppMode(savedMode as any);
-
-    const savedColor = localStorage.getItem('todo_pointColor');
-    if (savedColor) setPointColor(savedColor);
-
-    const savedCats = localStorage.getItem('todo_categories');
-    if (savedCats) {
-      const parsed = JSON.parse(savedCats);
-      setCategories(parsed);
-      if (parsed.length > 0) setSelectedCategoryName(parsed[0].name);
-    } else {
-      setSelectedCategoryName('마케팅');
-    }
-
+    fetchSettings();
     fetchTodos();
   }, []);
 
-  // 2. 카테고리나 테마가 바뀔 때마다 내 기기에 영구 저장하기
-  useEffect(() => {
-    if (isClient) {
-      localStorage.setItem('todo_appMode', appMode);
-      localStorage.setItem('todo_pointColor', pointColor);
-      localStorage.setItem('todo_categories', JSON.stringify(categories));
+  // 클라우드에서 테마/카테고리 불러오기
+  async function fetchSettings() {
+    const { data } = await supabase.from('todomate_settings').select('*').eq('id', 1).single();
+    if (data) {
+      if (data.app_mode) setAppMode(data.app_mode);
+      if (data.point_color) setPointColor(data.point_color);
+      if (data.categories && data.categories.length > 0) {
+        setCategories(data.categories);
+        setSelectedCategoryName(data.categories[0].name);
+      }
+    } else {
+      // 처음 접속 시 기본값 저장해두기
+      await supabase.from('todomate_settings').insert([{
+        id: 1,
+        app_mode: 'light',
+        point_color: '#007AFF',
+        categories: categories
+      }]);
+      setSelectedCategoryName(categories[0].name);
     }
-  }, [appMode, pointColor, categories, isClient]);
+  }
 
-  // 클라우드에서 일정 불러오기 및 카테고리 자동 복구
+  // 설정창을 닫을 때 현재 테마/카테고리 상태를 클라우드에 영구 저장!
+  const closeSettingsAndSave = async () => {
+    setIsSettingsOpen(false);
+    await supabase.from('todomate_settings').upsert({
+      id: 1,
+      app_mode: appMode,
+      point_color: pointColor,
+      categories: categories
+    });
+  };
+
   async function fetchTodos() {
     const { data } = await supabase.from('todomate_todos').select('*').order('id', { ascending: true });
     if (data) {
@@ -100,22 +109,6 @@ export default function Home() {
         isDone: d.is_completed
       }));
       setEvents(mappedData);
-
-      // 내가 다른 기기에서 쓴 일정인데 현재 카테고리 목록에 없다면? -> 알아서 추가!
-      setCategories(prev => {
-        const newCats = [...prev];
-        const existingNames = newCats.map(c => c.name);
-        let isChanged = false;
-
-        mappedData.forEach(ev => {
-          if (ev.categoryName && !existingNames.includes(ev.categoryName)) {
-            newCats.push({ id: Date.now() + Math.random(), name: ev.categoryName, color: '#9CA3AF' }); // 없는 카테고리는 기본 회색으로 복구
-            existingNames.push(ev.categoryName);
-            isChanged = true;
-          }
-        });
-        return isChanged ? newCats : prev;
-      });
     }
   }
 
@@ -159,7 +152,7 @@ export default function Home() {
   const updateCategoryColor = (id: number, color: string) => setCategories(categories.map(c => c.id === id ? { ...c, color } : c));
   const toggleCollapse = (name: string) => setCollapsedCats(prev => prev.includes(name as any) ? prev.filter(n => n !== name as any) : [...prev, name as any]);
 
-  if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>; // 에러 방지용 로딩 화면
+  if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>; 
 
   return (
     <main className={`min-h-screen ${t.page} flex items-center justify-center font-sans antialiased md:p-6 transition-colors duration-300`}>
@@ -265,12 +258,12 @@ export default function Home() {
         <AnimatePresence>
           {isSettingsOpen && (
             <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsSettingsOpen(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" />
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeSettingsAndSave} className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" />
               <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[480px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl max-h-[85vh] flex flex-col pointer-events-auto relative z-10`}>
                 <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6 md:hidden" />
                 <div className="flex justify-between items-center mb-6">
                   <h2 className={`text-xl font-bold ${t.text}`}>앱 설정</h2>
-                  <button onClick={() => setIsSettingsOpen(false)} className={`p-1.5 rounded-full ${t.card} border ${t.border} ${t.sub}`}><X size={20} /></button>
+                  <button onClick={closeSettingsAndSave} className={`p-1.5 rounded-full ${t.card} border ${t.border} ${t.sub}`}><X size={20} /></button>
                 </div>
                 <div className="space-y-8 overflow-y-auto pb-6 pr-2">
                   <div className="space-y-3">
@@ -351,7 +344,6 @@ export default function Home() {
             </div>
           )}
         </AnimatePresence>
-
       </div>
     </main>
   );
