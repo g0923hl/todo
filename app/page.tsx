@@ -326,7 +326,7 @@ export default function Home() {
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
           <div className="flex-1 overflow-y-auto px-6 pt-4 pb-24">
             
-            {/* 🔥 프로필 잘림 100% 방지: pt-2와 px-1 추가로 outline이 튕겨나갈 여유 공간 확보 */}
+            {/* 프로필 바 */}
             <div className="flex gap-3 overflow-x-auto pt-2 pb-3 px-1 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
               {allUsers.map((u) => {
                 const isSelectedProfile = viewingUserId === u.user_id;
@@ -380,7 +380,6 @@ export default function Home() {
                       {!isCollapsed && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden space-y-2 ml-1">
                           {sortedEvents.map(ev => (
-                            // 🔥 수정 창 진입 해결: 일정 칸 전체(motion.div)를 클릭하면 무조건 수정 모달이 열림!
                             <motion.div 
                               layout 
                               initial={{ opacity: 0, y: 5 }} 
@@ -390,7 +389,6 @@ export default function Home() {
                               className={`group flex items-center gap-3 p-3.5 rounded-xl border ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'} ${isMyProfile ? 'cursor-pointer hover:border-blue-300' : 'cursor-default'}`}
                             >
                               
-                              {/* 체크박스 (여기를 누르면 모달이 열리지 않고 완료 처리만 되도록 버블링 방지) */}
                               <div 
                                 onClick={(e) => { e.stopPropagation(); toggleEvent(ev.id, ev.isDone); }} 
                                 className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 ${isMyProfile ? 'cursor-pointer' : 'cursor-default'}`} 
@@ -399,13 +397,16 @@ export default function Home() {
                                 {ev.isDone && <Check size={12} className="text-white" />}
                               </div>
                               
-                              {/* 글씨 영역 */}
+                              {/* 🔥 에러 원인이었던 title 속성을 컴포넌트가 아닌 span으로 분리 */}
                               <div className="flex-1 flex items-center gap-2 min-w-0">
                                 <span className={`${fs} font-medium truncate ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
-                                {ev.isSecret && <Lock size={14} className="text-gray-400 shrink-0" title="나만 보기" />}
+                                {ev.isSecret && (
+                                  <span title="나만 보기" className="shrink-0 flex items-center">
+                                    <Lock size={14} className="text-gray-400" />
+                                  </span>
+                                )}
                               </div>
                               
-                              {/* 퀵 액션 버튼들 */}
                               {isMyProfile && (
                                 <div className="flex items-center gap-1 shrink-0 text-gray-400 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                   <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors" title="오늘 하기"><CalendarDays size={16} /></button>
