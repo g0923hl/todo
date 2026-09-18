@@ -281,15 +281,15 @@ export default function Home() {
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
           <div className="flex-1 overflow-y-auto px-6 pt-6 pb-24">
             
-            {/* 🔥 친구 프로필 바 (새로 추가됨) */}
+            {{/* 🔥 친구 프로필 바 (새로 추가됨) */}
             <div className="flex gap-4 overflow-x-auto pb-4 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
               {allUsers.map((u) => {
                 const isSelectedProfile = viewingUserId === u.user_id;
                 const displayName = u.nickname || '유저';
                 return (
                   <div key={u.user_id} onClick={() => setViewingUserId(u.user_id)} className="flex flex-col items-center gap-1.5 cursor-pointer group shrink-0">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm transition-all duration-300 ${isSelectedProfile ? 'ring-4 ring-offset-2 ring-offset-transparent' : 'opacity-70 group-hover:opacity-100 group-hover:scale-105'}`}
-                         style={{ backgroundColor: u.point_color || '#ccc', ringColor: isSelectedProfile ? u.point_color : 'transparent' }}>
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm transition-all duration-300 ${isSelectedProfile ? 'outline outline-3 outline-offset-2' : 'opacity-70 group-hover:opacity-100 group-hover:scale-105'}`}
+                         style={{ backgroundColor: u.point_color || '#ccc', outlineColor: isSelectedProfile ? u.point_color : 'transparent' }}>
                       {displayName.substring(0, 1)}
                     </div>
                     <span className={`text-[11px] font-bold ${isSelectedProfile ? t.text : t.sub}`}>{displayName} {u.user_id === user.id && '(나)'}</span>
