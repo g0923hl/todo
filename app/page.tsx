@@ -326,7 +326,8 @@ export default function Home() {
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
           <div className="flex-1 overflow-y-auto px-6 pt-4 pb-24">
             
-            <div className="flex gap-3 overflow-x-auto pb-3 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
+            {/* 🔥 프로필 잘림 100% 방지: pt-2와 px-1 추가로 outline이 튕겨나갈 여유 공간 확보 */}
+            <div className="flex gap-3 overflow-x-auto pt-2 pb-3 px-1 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
               {allUsers.map((u) => {
                 const isSelectedProfile = viewingUserId === u.user_id;
                 const displayName = u.nickname || '유저';
@@ -379,25 +380,37 @@ export default function Home() {
                       {!isCollapsed && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden space-y-2 ml-1">
                           {sortedEvents.map(ev => (
-                            <motion.div layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={ev.id} className={`group flex items-center gap-3 p-3.5 rounded-xl border ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'}`}>
+                            // 🔥 수정 창 진입 해결: 일정 칸 전체(motion.div)를 클릭하면 무조건 수정 모달이 열림!
+                            <motion.div 
+                              layout 
+                              initial={{ opacity: 0, y: 5 }} 
+                              animate={{ opacity: 1, y: 0 }} 
+                              key={ev.id} 
+                              onClick={() => isMyProfile && setEditingEvent(ev)}
+                              className={`group flex items-center gap-3 p-3.5 rounded-xl border ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'} ${isMyProfile ? 'cursor-pointer hover:border-blue-300' : 'cursor-default'}`}
+                            >
                               
-                              {/* 체크박스 */}
-                              <div onClick={() => toggleEvent(ev.id, ev.isDone)} className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 ${isMyProfile ? 'cursor-pointer' : 'cursor-default'}`} style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
+                              {/* 체크박스 (여기를 누르면 모달이 열리지 않고 완료 처리만 되도록 버블링 방지) */}
+                              <div 
+                                onClick={(e) => { e.stopPropagation(); toggleEvent(ev.id, ev.isDone); }} 
+                                className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 ${isMyProfile ? 'cursor-pointer' : 'cursor-default'}`} 
+                                style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}
+                              >
                                 {ev.isDone && <Check size={12} className="text-white" />}
                               </div>
                               
-                              {/* 글씨 영역 (클릭하면 무조건 수정 모달 열림) */}
-                              <div onClick={() => isMyProfile && setEditingEvent(ev)} className={`flex-1 flex items-center gap-2 min-w-0 py-1 ${isMyProfile ? 'cursor-pointer hover:opacity-70' : 'cursor-default'}`}>
+                              {/* 글씨 영역 */}
+                              <div className="flex-1 flex items-center gap-2 min-w-0">
                                 <span className={`${fs} font-medium truncate ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
                                 {ev.isSecret && <Lock size={14} className="text-gray-400 shrink-0" title="나만 보기" />}
                               </div>
                               
-                              {/* 🔥 모바일에서도 투명해지지 않고 항상 보이게 수정한 퀵 액션 버튼들! */}
+                              {/* 퀵 액션 버튼들 */}
                               {isMyProfile && (
                                 <div className="flex items-center gap-1 shrink-0 text-gray-400 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                   <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors" title="오늘 하기"><CalendarDays size={16} /></button>
                                   <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, addDays(new Date(), 1)); }} className="p-1.5 hover:text-orange-500 hover:bg-orange-50 rounded-md transition-colors" title="미루기"><ArrowRight size={16} /></button>
-                                  <button onClick={(e) => deleteEvent(ev.id, e)} className="p-1.5 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="삭제"><Trash2 size={16} /></button>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteEvent(ev.id, e); }} className="p-1.5 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="삭제"><Trash2 size={16} /></button>
                                 </div>
                               )}
                             </motion.div>
@@ -572,10 +585,8 @@ export default function Home() {
                 </div>
                 <form onSubmit={updateEvent} className="flex flex-col gap-4">
                   <div className="flex items-center justify-between gap-2">
-                    {/* 날짜가 꼬이지 않도록 안전장치 T00:00:00 추가 */}
                     <input type="date" value={format(editingEvent.date, 'yyyy-MM-dd')} onChange={(e) => setEditingEvent({...editingEvent, date: new Date(e.target.value + 'T00:00:00')})} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.bg} ${t.text} font-medium outline-none shrink-0`} />
                     <div className="flex gap-2">
-                      {/* 🔥 여기에도 "오늘 하기 / 미루기" 버튼이 완벽하게 돌아왔습니다! */}
                       <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, new Date()); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors`}>오늘 하기</button>
                       <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, addDays(new Date(), 1)); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-orange-50 text-orange-500 hover:bg-orange-100 transition-colors`}>미루기</button>
                     </div>
