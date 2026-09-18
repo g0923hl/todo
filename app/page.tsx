@@ -132,7 +132,6 @@ export default function Home() {
     }
   }
 
-  // 이미지 압축 및 처리
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -143,7 +142,7 @@ export default function Home() {
     }
   };
 
-  // 프로필 저장 함수 (저장 후 즉시 상단 목록 최신화)
+  // 🔥 확실하게 저장하고 즉시 화면 프로필 목록 갱신하기
   const saveProfileSettings = async () => {
     await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories }, { onConflict: 'user_id' });
     await fetchAllProfiles();
@@ -242,11 +241,12 @@ export default function Home() {
 
   return (
     <main className={`min-h-screen ${t.page} flex items-center justify-center font-sans antialiased md:p-6 transition-colors duration-300`}>
+      {/* 🔥 메인 박스 전체에 py-4를 주어 상단 프로필 동그라미가 절대 잘리지 않도록 안전 공간 확보 */}
       <div className={`w-full max-w-none md:max-w-4xl lg:max-w-5xl h-[100dvh] md:h-[85vh] ${t.bg} md:rounded-[32px] shadow-2xl flex flex-col md:flex-row relative overflow-hidden transition-colors duration-300`}>
         
         {/* ================= 좌측 사이드바 ================= */}
         <aside className={`w-full md:w-80 lg:w-96 flex flex-col shrink-0 border-b md:border-b-0 md:border-r ${t.border}`}>
-          <header className="px-6 pt-10 md:pt-8 pb-4 bg-transparent shrink-0">
+          <header className="px-6 pt-6 md:pt-6 pb-4 bg-transparent shrink-0">
             <div className="flex justify-between items-center mb-6">
               <h1 className={`text-2xl font-bold tracking-tight ${t.text}`}>{format(currentDate, 'yyyy년 M월')}</h1>
               <div className="flex gap-3">
@@ -300,10 +300,9 @@ export default function Home() {
 
         {/* ================= 우측 메인 영역 ================= */}
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
-          {/* 🔥 윗부분 여백(pt-4)을 주어서 프로필 동그라미가 잘리지 않도록 수정 완료! */}
-          <div className="flex-1 overflow-y-auto px-6 pt-4 pb-24">
+          <div className="flex-1 overflow-y-auto px-6 pt-6 pb-24">
             
-            {/* 프로필 바 */}
+            {/* 🔥 상단 친구 프로필 바 (동그라미가 카드 안쪽으로 완전히 들어오도록 배치) */}
             <div className="flex gap-3 overflow-x-auto pb-3 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
               {allUsers.map((u) => {
                 const isSelectedProfile = viewingUserId === u.user_id;
@@ -395,7 +394,7 @@ export default function Home() {
           {isSettingsOpen && (
             <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeSettingsAndSave} className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" />
-              <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[480px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl max-h-[85vh] flex flex-col pointer-events-auto relative z-10`}>
+              <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[480px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl max-h-[85vh] flex flex-col pointer-events-auto relative z-10`}>
                 <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6 md:hidden" />
                 <div className="flex justify-between items-center mb-6">
                   <h2 className={`text-xl font-bold ${t.text}`}>앱 설정</h2>
