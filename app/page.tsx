@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { format, addMonths, subMonths, addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isSameMonth, isSameDay } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight, LogOut, Type } from 'lucide-react';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -17,13 +17,13 @@ const THEMES = {
   pastel: { page: 'bg-[#F5F3EC]', bg: 'bg-[#FDFBF7]', text: 'text-[#5C5C5C]', sub: 'text-[#9C9C9C]', border: 'border-[#F0EBE1]', card: 'bg-white' },
 };
 
-// 🇰🇷 한국 주요 공휴일 데이터 (양력 고정 + 2026/2027 명절)
+const FONT_SIZES = { sm: 'text-[13px]', md: 'text-[15px]', lg: 'text-[17px]' };
+
 const HOLIDAYS: Record<string, string> = {
   '01-01': '신정', '03-01': '삼일절', '05-05': '어린이날', '06-06': '현충일',
   '08-15': '광복절', '10-03': '개천절', '10-09': '한글날', '12-25': '성탄절',
   '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴',
-  '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일',
-  '2026-08-17': '대체공휴일',
+  '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일', '2026-08-17': '대체공휴일',
   '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴',
   '2027-02-06': '설날 연휴', '2027-02-07': '설날', '2027-02-08': '설날 연휴', '2027-02-09': '대체공휴일',
   '2027-05-13': '부처님오신날', '2027-09-14': '추석 연휴', '2027-09-15': '추석', '2027-09-16': '추석 연휴'
@@ -32,6 +32,10 @@ const getHoliday = (d: Date) => HOLIDAYS[format(d, 'yyyy-MM-dd')] || HOLIDAYS[fo
 
 export default function Home() {
   const [isClient, setIsClient] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoginMode, setIsLoginMode] = useState(true);
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -39,17 +43,13 @@ export default function Home() {
   
   const [appMode, setAppMode] = useState<'light' | 'dark' | 'pastel'>('light');
   const [pointColor, setPointColor] = useState('#007AFF');
+  const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<any>(null); // 🔥 일정 수정용 상태 추가
+  const [editingEvent, setEditingEvent] = useState<any>(null);
   
-  const [categories, setCategories] = useState([
-    { id: 1, name: '마케팅', color: '#60A5FA' },
-    { id: 2, name: '디자인', color: '#C084FC' },
-    { id: 3, name: '개인일정', color: '#4ADE80' },
-  ]);
-  
+  const [categories, setCategories] = useState([{ id: 1, name: '기본', color: '#60A5FA' }]);
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState('#FF9999');
   const [collapsedCats, setCollapsedCats] = useState<number[]>([]);
@@ -58,55 +58,71 @@ export default function Home() {
   const [selectedCategoryName, setSelectedCategoryName] = useState('');
   const [events, setEvents] = useState<any[]>([]);
 
-  const monthStart = startOfMonth(currentDate);
-  const monthEnd = endOfMonth(monthStart);
-  const startDate = view === 'month' ? startOfWeek(monthStart) : startOfWeek(currentDate);
-  const endDate = view === 'month' ? endOfWeek(monthEnd) : endOfWeek(currentDate);
-
-  const days = [];
-  let day = startDate;
-  while (day <= endDate) {
-    days.push(day);
-    day = addDays(day, 1);
-  }
-
-  const t = THEMES[appMode];
-
+  // 1. 유저 로그인 상태 확인
   useEffect(() => {
     setIsClient(true);
-    fetchSettings();
-    fetchTodos();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
+  // 2. 유저가 접속하면 데이터 불러오기
+  useEffect(() => {
+    if (user) {
+      claimMyOldDataAndFetch();
+    }
+  }, [user]);
+
+  // 🔥 렌냥님의 예전 데이터를 새 계정으로 쏙 흡수하는 마법의 함수!
+  const claimMyOldDataAndFetch = async () => {
+    await supabase.from('todomate_settings').update({ user_id: user.id }).is('user_id', null);
+    await supabase.from('todomate_todos').update({ user_id: user.id }).is('user_id', null);
+    fetchSettings();
+    fetchTodos();
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoginMode) {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) alert('로그인 실패: ' + error.message);
+    } else {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) alert('회원가입 실패: ' + error.message);
+      else alert('회원가입 성공! 이제 로그인해주세요.');
+    }
+  };
+
   async function fetchSettings() {
-    const { data } = await supabase.from('todomate_settings').select('*').eq('id', 1).single();
+    const { data } = await supabase.from('todomate_settings').select('*').eq('user_id', user.id).single();
     if (data) {
       if (data.app_mode) setAppMode(data.app_mode);
       if (data.point_color) setPointColor(data.point_color);
+      if (data.font_size) setFontSize(data.font_size);
       if (data.categories && data.categories.length > 0) {
         setCategories(data.categories);
         setSelectedCategoryName(data.categories[0].name);
       }
     } else {
-      await supabase.from('todomate_settings').insert([{ id: 1, app_mode: 'light', point_color: '#007AFF', categories }]);
+      await supabase.from('todomate_settings').insert([{ user_id: user.id, app_mode: 'light', point_color: '#007AFF', font_size: 'md', categories }]);
       setSelectedCategoryName(categories[0].name);
     }
   }
 
   const closeSettingsAndSave = async () => {
     setIsSettingsOpen(false);
-    await supabase.from('todomate_settings').upsert({ id: 1, app_mode: appMode, point_color: pointColor, categories });
+    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, categories }, { onConflict: 'user_id' });
   };
 
   async function fetchTodos() {
-    const { data } = await supabase.from('todomate_todos').select('*').order('id', { ascending: true });
+    const { data } = await supabase.from('todomate_todos').select('*').eq('user_id', user.id).order('id', { ascending: true });
     if (data) {
       setEvents(data.map(d => ({
-        id: d.id,
-        date: d.target_date ? new Date(d.target_date) : new Date(),
-        title: d.content,
-        categoryName: d.category,
-        isDone: d.is_completed
+        id: d.id, date: d.target_date ? new Date(d.target_date) : new Date(), title: d.content, categoryName: d.category, isDone: d.is_completed
       })));
     }
   }
@@ -114,10 +130,8 @@ export default function Home() {
   const addEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputTitle.trim() || !selectedCategoryName) return;
-    await supabase.from('todomate_todos').insert([{ content: inputTitle, is_completed: false, category: selectedCategoryName, target_date: format(selectedDate, 'yyyy-MM-dd') }]);
-    setInputTitle('');
-    setIsAddModalOpen(false);
-    fetchTodos();
+    await supabase.from('todomate_todos').insert([{ user_id: user.id, content: inputTitle, is_completed: false, category: selectedCategoryName, target_date: format(selectedDate, 'yyyy-MM-dd') }]);
+    setInputTitle(''); setIsAddModalOpen(false); fetchTodos();
   };
 
   const toggleEvent = async (id: number, currentStatus: boolean) => {
@@ -131,7 +145,6 @@ export default function Home() {
     fetchTodos();
   };
 
-  // 🔥 일정 빠른 이동 (오늘/내일) 및 수정 기능
   const quickMoveEvent = async (id: number, targetDate: Date) => {
     await supabase.from('todomate_todos').update({ target_date: format(targetDate, 'yyyy-MM-dd') }).eq('id', id);
     fetchTodos();
@@ -140,13 +153,8 @@ export default function Home() {
   const updateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent.title.trim()) return;
-    await supabase.from('todomate_todos').update({
-      content: editingEvent.title,
-      category: editingEvent.categoryName,
-      target_date: format(editingEvent.date, 'yyyy-MM-dd')
-    }).eq('id', editingEvent.id);
-    setEditingEvent(null);
-    fetchTodos();
+    await supabase.from('todomate_todos').update({ content: editingEvent.title, category: editingEvent.categoryName, target_date: format(editingEvent.date, 'yyyy-MM-dd') }).eq('id', editingEvent.id);
+    setEditingEvent(null); fetchTodos();
   };
 
   const moveCategory = (index: number, dir: 'up' | 'down') => {
@@ -160,8 +168,40 @@ export default function Home() {
   const updateCategoryColor = (id: number, color: string) => setCategories(categories.map(c => c.id === id ? { ...c, color } : c));
   const toggleCollapse = (name: string) => setCollapsedCats(prev => prev.includes(name as any) ? prev.filter(n => n !== name as any) : [...prev, name as any]);
 
-  if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>; 
+  const monthStart = startOfMonth(currentDate); const monthEnd = endOfMonth(monthStart);
+  const startDate = view === 'month' ? startOfWeek(monthStart) : startOfWeek(currentDate);
+  const endDate = view === 'month' ? endOfWeek(monthEnd) : endOfWeek(currentDate);
+  const days = []; let day = startDate; while (day <= endDate) { days.push(day); day = addDays(day, 1); }
 
+  const t = THEMES[appMode];
+  const fs = FONT_SIZES[fontSize];
+
+  if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>;
+
+  // 🔒 로그인 화면
+  if (!user) {
+    return (
+      <main className="min-h-screen bg-[#F2F2F7] flex items-center justify-center p-6 font-sans">
+        <div className="w-full max-w-md bg-white p-8 rounded-[32px] shadow-xl flex flex-col items-center">
+          <div className="w-16 h-16 rounded-2xl bg-blue-500 mb-6 flex items-center justify-center shadow-lg"><Check size={32} className="text-white" /></div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{isLoginMode ? '환영합니다!' : '계정 만들기'}</h1>
+          <p className="text-gray-500 text-sm mb-8">{isLoginMode ? '나만의 일정을 관리해보세요' : '이메일로 간편하게 가입하세요'}</p>
+          <form onSubmit={handleAuth} className="w-full space-y-4">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일" required className="w-full px-5 py-4 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 outline-none transition-all" />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호 (6자리 이상)" required minLength={6} className="w-full px-5 py-4 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 outline-none transition-all" />
+            <button type="submit" className="w-full py-4 bg-blue-500 text-white rounded-2xl font-bold text-lg hover:bg-blue-600 active:scale-95 transition-all shadow-md mt-2">
+              {isLoginMode ? '로그인' : '가입하기'}
+            </button>
+          </form>
+          <button onClick={() => setIsLoginMode(!isLoginMode)} className="mt-6 text-sm text-gray-400 hover:text-gray-600 font-medium">
+            {isLoginMode ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  // 🔓 메인 앱 화면
   return (
     <main className={`min-h-screen ${t.page} flex items-center justify-center font-sans antialiased md:p-6 transition-colors duration-300`}>
       <div className={`w-full max-w-none md:max-w-4xl lg:max-w-5xl h-[100dvh] md:h-[85vh] ${t.bg} md:rounded-[32px] shadow-2xl flex flex-col md:flex-row relative overflow-hidden transition-colors duration-300`}>
@@ -197,7 +237,7 @@ export default function Home() {
                 const isCurrentMonth = isSameMonth(date, currentDate);
                 const dayEvents = events.filter(e => isSameDay(e.date, date));
                 const holiday = getHoliday(date);
-                const isRedDay = holiday || date.getDay() === 0; // 공휴일이거나 일요일이면 빨간색
+                const isRedDay = holiday || date.getDay() === 0;
 
                 return (
                   <div key={i} onClick={() => setSelectedDate(date)} className="flex flex-col items-center cursor-pointer h-10 relative group">
@@ -206,7 +246,6 @@ export default function Home() {
                       style={{ backgroundColor: isSelected ? pointColor : 'transparent', color: (isToday && !isSelected) ? pointColor : undefined }}>
                       {format(date, 'd')}
                     </div>
-                    {/* 공휴일 툴팁 (PC 호버 시 표시) */}
                     {holiday && <div className="absolute -top-6 bg-black/70 text-white text-[10px] px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">{holiday}</div>}
                     <div className="flex gap-0.5 mt-0.5 absolute bottom-0">
                       {dayEvents.slice(0, 3).map((ev, idx) => {
@@ -253,20 +292,18 @@ export default function Home() {
                       {!isCollapsed && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden space-y-2 ml-1">
                           {sortedEvents.map(ev => (
-                            // 🔥 여기서 일정을 클릭하면 '수정 모달'이 열리게 바뀝니다
                             <motion.div layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={ev.id} className={`group flex items-center gap-3 p-3.5 rounded-xl border ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'}`}>
                               <div onClick={() => toggleEvent(ev.id, ev.isDone)} className="w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 cursor-pointer" style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
                                 {ev.isDone && <Check size={12} className="text-white" />}
                               </div>
-                              <span onClick={() => setEditingEvent(ev)} className={`text-[15px] font-medium flex-1 cursor-pointer hover:opacity-70 ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
+                              {/* 🔥 여기에 글자 크기(fs) 변수가 적용됩니다! */}
+                              <span onClick={() => setEditingEvent(ev)} className={`${fs} font-medium flex-1 cursor-pointer hover:opacity-70 ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
                               
-                              {/* PC에서 마우스를 올렸을 때 보이는 빠른 액션 아이콘들 */}
                               <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-1 transition-opacity">
                                 <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 text-gray-400 hover:text-blue-500" title="오늘 하기"><CalendarDays size={16} /></button>
                                 <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, addDays(new Date(), 1)); }} className="p-1.5 text-gray-400 hover:text-orange-400" title="내일로 미루기"><ArrowRight size={16} /></button>
                                 <button onClick={(e) => deleteEvent(ev.id, e)} className="p-1.5 text-gray-400 hover:text-red-400"><Trash2 size={16} /></button>
                               </div>
-                              {/* 모바일용 항상 보이는 삭제 버튼 (스와이프 대신 간편하게) */}
                               <button onClick={(e) => deleteEvent(ev.id, e)} className="md:hidden p-1.5 text-gray-300"><Trash2 size={16} /></button>
                             </motion.div>
                           ))}
@@ -283,7 +320,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ================= (생략 없이 포함됨) 설정 모달 ================= */}
+        {/* ================= 설정 모달 ================= */}
         <AnimatePresence>
           {isSettingsOpen && (
             <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
@@ -294,6 +331,7 @@ export default function Home() {
                   <h2 className={`text-xl font-bold ${t.text}`}>앱 설정</h2>
                   <button onClick={closeSettingsAndSave} className={`p-1.5 rounded-full ${t.card} border ${t.border} ${t.sub}`}><X size={20} /></button>
                 </div>
+                
                 <div className="space-y-8 overflow-y-auto pb-6 pr-2">
                   <div className="space-y-3">
                     <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>외관 및 테마</h3>
@@ -301,12 +339,22 @@ export default function Home() {
                       <div className={`flex p-1 rounded-xl ${t.page}`}>
                         {[ {id:'light', name:'라이트'}, {id:'dark', name:'다크'}, {id:'pastel', name:'파스텔'} ].map(mode => <button key={mode.id} onClick={() => setAppMode(mode.id as any)} className={`flex-1 py-1.5 rounded-lg text-sm font-bold ${appMode === mode.id ? `${t.card} shadow-sm${t.text}` : t.sub}`}>{mode.name}</button>)}
                       </div>
-                      <div className="flex items-center justify-between mt-2">
+                      
+                      {/* 🔥 글자 크기 설정 UI */}
+                      <div className="flex items-center justify-between mt-2 pt-4 border-t border-gray-100 dark:border-gray-800">
+                        <span className={`text-[15px] font-medium flex items-center gap-2 ${t.text}`}><Type size={16}/> 글자 크기</span>
+                        <div className={`flex p-1 rounded-xl ${t.page}`}>
+                          {[ {id:'sm', name:'작게'}, {id:'md', name:'보통'}, {id:'lg', name:'크게'} ].map(size => <button key={size.id} onClick={() => setFontSize(size.id as any)} className={`px-4 py-1.5 rounded-lg text-sm font-bold ${fontSize === size.id ? `${t.card} shadow-sm${t.text}` : t.sub}`}>{size.name}</button>)}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between mt-2 pt-4 border-t border-gray-100 dark:border-gray-800">
                         <span className={`text-[15px] font-medium ${t.text}`}>포인트 컬러</span>
                         <div className="relative w-8 h-8 rounded-full shadow-sm overflow-hidden border border-gray-200"><input type="color" value={pointColor} onChange={(e) => setPointColor(e.target.value)} className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer" /></div>
                       </div>
                     </div>
                   </div>
+
                   <div className="space-y-3">
                     <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>카테고리 관리</h3>
                     <div className={`p-4 rounded-2xl ${t.card} border ${t.border} space-y-3`}>
@@ -329,6 +377,13 @@ export default function Home() {
                         <button onClick={addCategory} className="px-4 py-1.5 rounded-lg text-sm font-bold text-white shadow-sm" style={{ backgroundColor: pointColor }}>추가</button>
                       </div>
                     </div>
+                  </div>
+                  
+                  {/* 로그아웃 버튼 */}
+                  <div className="pt-4">
+                    <button onClick={() => supabase.auth.signOut()} className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-red-500 bg-red-50 hover:bg-red-100 font-bold transition-colors">
+                      <LogOut size={18} /> 로그아웃
+                    </button>
                   </div>
                 </div>
               </motion.div>
@@ -368,7 +423,7 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* ================= 🔥 일정 수정 / 이동 모달 ================= */}
+        {/* ================= 일정 수정 / 이동 모달 ================= */}
         <AnimatePresence>
           {editingEvent && (
             <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
@@ -380,12 +435,11 @@ export default function Home() {
                   <button onClick={() => setEditingEvent(null)} className={`p-1.5 rounded-full ${t.card} border ${t.border} ${t.sub}`}><X size={20} /></button>
                 </div>
                 <form onSubmit={updateEvent} className="flex flex-col gap-4">
-                  {/* 날짜 선택 및 퀵 액션 (오늘하기/미루기) */}
                   <div className="flex items-center justify-between gap-2">
                     <input type="date" value={format(editingEvent.date, 'yyyy-MM-dd')} onChange={(e) => setEditingEvent({...editingEvent, date: new Date(e.target.value)})} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.bg} ${t.text} font-medium outline-none shrink-0`} />
                     <div className="flex gap-2">
                       <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, new Date()); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors`}>오늘 하기</button>
-                      <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, addDays(new Date(), 1)); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-orange-50 text-orange-500 hover:bg-orange-100 transition-colors`}>내일로 미루기</button>
+                      <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, addDays(new Date(), 1)); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-orange-50 text-orange-500 hover:bg-orange-100 transition-colors`}>미루기</button>
                     </div>
                   </div>
                   <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm mt-2`}>
@@ -412,5 +466,4 @@ export default function Home() {
     </main>
   );
 }
-
 
