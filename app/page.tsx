@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { format, addMonths, subMonths, addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isSameMonth, isSameDay } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight, LogOut, Type } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight, LogOut, Type, UserRound } from 'lucide-react';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -33,6 +33,11 @@ const getHoliday = (d: Date) => HOLIDAYS[format(d, 'yyyy-MM-dd')] || HOLIDAYS[fo
 export default function Home() {
   const [isClient, setIsClient] = useState(false);
   const [user, setUser] = useState<any>(null);
+  
+  // 🔥 소셜 기능 상태
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [viewingUserId, setViewingUserId] = useState<string>('');
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoginMode, setIsLoginMode] = useState(true);
@@ -44,6 +49,7 @@ export default function Home() {
   const [appMode, setAppMode] = useState<'light' | 'dark' | 'pastel'>('light');
   const [pointColor, setPointColor] = useState('#007AFF');
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>('md');
+  const [myNickname, setMyNickname] = useState('유저');
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -58,31 +64,37 @@ export default function Home() {
   const [selectedCategoryName, setSelectedCategoryName] = useState('');
   const [events, setEvents] = useState<any[]>([]);
 
-  // 1. 유저 로그인 상태 확인
   useEffect(() => {
     setIsClient(true);
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
+    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null));
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. 유저가 접속하면 데이터 불러오기
   useEffect(() => {
     if (user) {
-      claimMyOldDataAndFetch();
+      setViewingUserId(user.id);
+      claimMyOldDataAndFetch(user.id);
+      fetchAllProfiles();
     }
   }, [user]);
 
-  // 🔥 렌냥님의 예전 데이터를 새 계정으로 쏙 흡수하는 마법의 함수!
-  const claimMyOldDataAndFetch = async () => {
-    await supabase.from('todomate_settings').update({ user_id: user.id }).is('user_id', null);
-    await supabase.from('todomate_todos').update({ user_id: user.id }).is('user_id', null);
-    fetchSettings();
-    fetchTodos();
+  // 친구를 선택하면 그 사람의 데이터로 화면이 바뀝니다!
+  useEffect(() => {
+    if (viewingUserId) {
+      fetchSettingsFor(viewingUserId);
+      fetchTodosFor(viewingUserId);
+    }
+  }, [viewingUserId]);
+
+  const fetchAllProfiles = async () => {
+    const { data } = await supabase.from('todomate_settings').select('user_id, nickname, point_color').not('user_id', 'is', null);
+    if (data) setAllUsers(data);
+  };
+
+  const claimMyOldDataAndFetch = async (uid: string) => {
+    await supabase.from('todomate_settings').update({ user_id: uid }).is('user_id', null);
+    await supabase.from('todomate_todos').update({ user_id: uid }).is('user_id', null);
   };
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -97,33 +109,38 @@ export default function Home() {
     }
   };
 
-  async function fetchSettings() {
-    const { data } = await supabase.from('todomate_settings').select('*').eq('user_id', user.id).single();
+  async function fetchSettingsFor(uid: string) {
+    const { data } = await supabase.from('todomate_settings').select('*').eq('user_id', uid).single();
     if (data) {
-      if (data.app_mode) setAppMode(data.app_mode);
-      if (data.point_color) setPointColor(data.point_color);
-      if (data.font_size) setFontSize(data.font_size);
+      setAppMode(data.app_mode || 'light');
+      setPointColor(data.point_color || '#007AFF');
+      setFontSize(data.font_size || 'md');
+      if (uid === user?.id) setMyNickname(data.nickname || user.email?.split('@')[0] || '유저');
       if (data.categories && data.categories.length > 0) {
         setCategories(data.categories);
         setSelectedCategoryName(data.categories[0].name);
       }
-    } else {
-      await supabase.from('todomate_settings').insert([{ user_id: user.id, app_mode: 'light', point_color: '#007AFF', font_size: 'md', categories }]);
+    } else if (uid === user?.id) {
+      const defaultNick = user.email?.split('@')[0] || '유저';
+      await supabase.from('todomate_settings').insert([{ user_id: uid, app_mode: 'light', point_color: '#007AFF', font_size: 'md', nickname: defaultNick, categories }]);
+      setMyNickname(defaultNick);
       setSelectedCategoryName(categories[0].name);
+      fetchAllProfiles(); // 새 프로필 목록 갱신
     }
   }
 
   const closeSettingsAndSave = async () => {
     setIsSettingsOpen(false);
-    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, categories }, { onConflict: 'user_id' });
+    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, categories }, { onConflict: 'user_id' });
+    fetchAllProfiles(); // 설정 저장 후 프로필 바 갱신
   };
 
-  async function fetchTodos() {
-    const { data } = await supabase.from('todomate_todos').select('*').eq('user_id', user.id).order('id', { ascending: true });
+  async function fetchTodosFor(uid: string) {
+    const { data } = await supabase.from('todomate_todos').select('*').eq('user_id', uid).order('id', { ascending: true });
     if (data) {
-      setEvents(data.map(d => ({
-        id: d.id, date: d.target_date ? new Date(d.target_date) : new Date(), title: d.content, categoryName: d.category, isDone: d.is_completed
-      })));
+      setEvents(data.map(d => ({ id: d.id, date: d.target_date ? new Date(d.target_date) : new Date(), title: d.content, categoryName: d.category, isDone: d.is_completed })));
+    } else {
+      setEvents([]);
     }
   }
 
@@ -131,10 +148,11 @@ export default function Home() {
     e.preventDefault();
     if (!inputTitle.trim() || !selectedCategoryName) return;
     await supabase.from('todomate_todos').insert([{ user_id: user.id, content: inputTitle, is_completed: false, category: selectedCategoryName, target_date: format(selectedDate, 'yyyy-MM-dd') }]);
-    setInputTitle(''); setIsAddModalOpen(false); fetchTodos();
+    setInputTitle(''); setIsAddModalOpen(false); fetchTodosFor(user.id);
   };
 
   const toggleEvent = async (id: number, currentStatus: boolean) => {
+    if (viewingUserId !== user?.id) return; // 내 프로필이 아니면 체크 금지!
     setEvents(events.map(ev => ev.id === id ? { ...ev, isDone: !currentStatus } : ev));
     await supabase.from('todomate_todos').update({ is_completed: !currentStatus }).eq('id', id);
   };
@@ -142,19 +160,19 @@ export default function Home() {
   const deleteEvent = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     await supabase.from('todomate_todos').delete().eq('id', id);
-    fetchTodos();
+    fetchTodosFor(user.id);
   };
 
   const quickMoveEvent = async (id: number, targetDate: Date) => {
     await supabase.from('todomate_todos').update({ target_date: format(targetDate, 'yyyy-MM-dd') }).eq('id', id);
-    fetchTodos();
+    fetchTodosFor(user.id);
   };
 
   const updateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent.title.trim()) return;
     await supabase.from('todomate_todos').update({ content: editingEvent.title, category: editingEvent.categoryName, target_date: format(editingEvent.date, 'yyyy-MM-dd') }).eq('id', editingEvent.id);
-    setEditingEvent(null); fetchTodos();
+    setEditingEvent(null); fetchTodosFor(user.id);
   };
 
   const moveCategory = (index: number, dir: 'up' | 'down') => {
@@ -175,10 +193,10 @@ export default function Home() {
 
   const t = THEMES[appMode];
   const fs = FONT_SIZES[fontSize];
+  const isMyProfile = viewingUserId === user?.id; // 현재 화면이 내 화면인지 여부
 
   if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>;
 
-  // 🔒 로그인 화면
   if (!user) {
     return (
       <main className="min-h-screen bg-[#F2F2F7] flex items-center justify-center p-6 font-sans">
@@ -201,7 +219,6 @@ export default function Home() {
     );
   }
 
-  // 🔓 메인 앱 화면
   return (
     <main className={`min-h-screen ${t.page} flex items-center justify-center font-sans antialiased md:p-6 transition-colors duration-300`}>
       <div className={`w-full max-w-none md:max-w-4xl lg:max-w-5xl h-[100dvh] md:h-[85vh] ${t.bg} md:rounded-[32px] shadow-2xl flex flex-col md:flex-row relative overflow-hidden transition-colors duration-300`}>
@@ -212,7 +229,7 @@ export default function Home() {
             <div className="flex justify-between items-center mb-6">
               <h1 className={`text-2xl font-bold tracking-tight ${t.text}`}>{format(currentDate, 'yyyy년 M월')}</h1>
               <div className="flex gap-3">
-                <button onClick={() => setIsSettingsOpen(true)} className={`p-1.5 rounded-full ${t.card} border ${t.border} shadow-sm hover:opacity-70 transition`}><Settings2 size={18} className={t.sub} /></button>
+                {isMyProfile && <button onClick={() => setIsSettingsOpen(true)} className={`p-1.5 rounded-full ${t.card} border ${t.border} shadow-sm hover:opacity-70 transition`}><Settings2 size={18} className={t.sub} /></button>}
                 <div className={`flex ${t.card} border ${t.border} rounded-full p-0.5 shadow-sm`}>
                   <button onClick={() => setCurrentDate(view === 'month' ? subMonths(currentDate, 1) : subWeeks(currentDate, 1))} className={`p-1 rounded-full hover:opacity-50 transition ${t.text}`}><ChevronLeft size={18} /></button>
                   <button onClick={() => setCurrentDate(view === 'month' ? addMonths(currentDate, 1) : addWeeks(currentDate, 1))} className={`p-1 rounded-full hover:opacity-50 transition ${t.text}`}><ChevronRight size={18} /></button>
@@ -263,11 +280,33 @@ export default function Home() {
         {/* ================= 우측 메인 영역 ================= */}
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
           <div className="flex-1 overflow-y-auto px-6 pt-6 pb-24">
-            <h2 className={`text-lg font-bold mb-6 flex items-center gap-2 ${t.text}`}>
-              {format(selectedDate, 'M월 d일')} 
-              <span className={`font-medium text-sm ${(getHoliday(selectedDate) || selectedDate.getDay() === 0) ? 'text-red-500' : t.sub}`}>
-                {format(selectedDate, 'EEEE')} {getHoliday(selectedDate) && `· ${getHoliday(selectedDate)}`}
-              </span>
+            
+            {/* 🔥 친구 프로필 바 (새로 추가됨) */}
+            <div className="flex gap-4 overflow-x-auto pb-4 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
+              {allUsers.map((u) => {
+                const isSelectedProfile = viewingUserId === u.user_id;
+                const displayName = u.nickname || '유저';
+                return (
+                  <div key={u.user_id} onClick={() => setViewingUserId(u.user_id)} className="flex flex-col items-center gap-1.5 cursor-pointer group shrink-0">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm transition-all duration-300 ${isSelectedProfile ? 'ring-4 ring-offset-2 ring-offset-transparent' : 'opacity-70 group-hover:opacity-100 group-hover:scale-105'}`}
+                         style={{ backgroundColor: u.point_color || '#ccc', ringColor: isSelectedProfile ? u.point_color : 'transparent' }}>
+                      {displayName.substring(0, 1)}
+                    </div>
+                    <span className={`text-[11px] font-bold ${isSelectedProfile ? t.text : t.sub}`}>{displayName} {u.user_id === user.id && '(나)'}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <h2 className={`text-lg font-bold mb-6 flex items-center justify-between ${t.text}`}>
+              <div className="flex items-center gap-2">
+                {format(selectedDate, 'M월 d일')} 
+                <span className={`font-medium text-sm ${(getHoliday(selectedDate) || selectedDate.getDay() === 0) ? 'text-red-500' : t.sub}`}>
+                  {format(selectedDate, 'EEEE')} {getHoliday(selectedDate) && `· ${getHoliday(selectedDate)}`}
+                </span>
+              </div>
+              {/* 내 프로필이 아닐 때 보여주는 뱃지 */}
+              {!isMyProfile && <span className="text-xs font-bold bg-blue-500 text-white px-2 py-1 rounded-md">친구 일정 (읽기전용)</span>}
             </h2>
             
             <div className="space-y-6">
@@ -293,18 +332,22 @@ export default function Home() {
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden space-y-2 ml-1">
                           {sortedEvents.map(ev => (
                             <motion.div layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={ev.id} className={`group flex items-center gap-3 p-3.5 rounded-xl border ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'}`}>
-                              <div onClick={() => toggleEvent(ev.id, ev.isDone)} className="w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 cursor-pointer" style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
+                              <div onClick={() => toggleEvent(ev.id, ev.isDone)} className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 ${isMyProfile ? 'cursor-pointer' : 'cursor-default'}`} style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
                                 {ev.isDone && <Check size={12} className="text-white" />}
                               </div>
-                              {/* 🔥 여기에 글자 크기(fs) 변수가 적용됩니다! */}
-                              <span onClick={() => setEditingEvent(ev)} className={`${fs} font-medium flex-1 cursor-pointer hover:opacity-70 ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
+                              <span onClick={() => isMyProfile && setEditingEvent(ev)} className={`${fs} font-medium flex-1 ${isMyProfile ? 'cursor-pointer hover:opacity-70' : 'cursor-default'} ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
                               
-                              <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-1 transition-opacity">
-                                <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 text-gray-400 hover:text-blue-500" title="오늘 하기"><CalendarDays size={16} /></button>
-                                <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, addDays(new Date(), 1)); }} className="p-1.5 text-gray-400 hover:text-orange-400" title="내일로 미루기"><ArrowRight size={16} /></button>
-                                <button onClick={(e) => deleteEvent(ev.id, e)} className="p-1.5 text-gray-400 hover:text-red-400"><Trash2 size={16} /></button>
-                              </div>
-                              <button onClick={(e) => deleteEvent(ev.id, e)} className="md:hidden p-1.5 text-gray-300"><Trash2 size={16} /></button>
+                              {/* 내 일정일 때만 호버/삭제 버튼이 보임 */}
+                              {isMyProfile && (
+                                <>
+                                  <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                                    <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 text-gray-400 hover:text-blue-500" title="오늘 하기"><CalendarDays size={16} /></button>
+                                    <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, addDays(new Date(), 1)); }} className="p-1.5 text-gray-400 hover:text-orange-400" title="내일로 미루기"><ArrowRight size={16} /></button>
+                                    <button onClick={(e) => deleteEvent(ev.id, e)} className="p-1.5 text-gray-400 hover:text-red-400"><Trash2 size={16} /></button>
+                                  </div>
+                                  <button onClick={(e) => deleteEvent(ev.id, e)} className="md:hidden p-1.5 text-gray-300"><Trash2 size={16} /></button>
+                                </>
+                              )}
                             </motion.div>
                           ))}
                         </motion.div>
@@ -315,9 +358,13 @@ export default function Home() {
               })}
             </div>
           </div>
-          <div className="absolute bottom-6 right-6 md:bottom-8 md:right-8 z-20">
-            <button onClick={() => setIsAddModalOpen(true)} style={{ backgroundColor: pointColor }} className="w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-white hover:scale-105 active:scale-95 transition-transform"><Plus size={28} /></button>
-          </div>
+          
+          {/* 내 프로필 화면일 때만 일정 추가 버튼(+) 노출 */}
+          {isMyProfile && (
+            <div className="absolute bottom-6 right-6 md:bottom-8 md:right-8 z-20">
+              <button onClick={() => setIsAddModalOpen(true)} style={{ backgroundColor: pointColor }} className="w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-white hover:scale-105 active:scale-95 transition-transform"><Plus size={28} /></button>
+            </div>
+          )}
         </section>
 
         {/* ================= 설정 모달 ================= */}
@@ -334,13 +381,19 @@ export default function Home() {
                 
                 <div className="space-y-8 overflow-y-auto pb-6 pr-2">
                   <div className="space-y-3">
-                    <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>외관 및 테마</h3>
+                    <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>내 프로필 & 테마</h3>
                     <div className={`p-4 rounded-2xl ${t.card} border ${t.border} flex flex-col gap-4`}>
+                      
+                      {/* 🔥 닉네임 설정 */}
+                      <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
+                        <span className={`text-[15px] font-medium flex items-center gap-2 ${t.text}`}><UserRound size={16}/> 닉네임</span>
+                        <input type="text" value={myNickname} onChange={(e) => setMyNickname(e.target.value)} className={`text-right bg-transparent outline-none font-bold ${t.text} border-b focus:border-blue-500 w-32`} placeholder="닉네임 입력" />
+                      </div>
+
                       <div className={`flex p-1 rounded-xl ${t.page}`}>
                         {[ {id:'light', name:'라이트'}, {id:'dark', name:'다크'}, {id:'pastel', name:'파스텔'} ].map(mode => <button key={mode.id} onClick={() => setAppMode(mode.id as any)} className={`flex-1 py-1.5 rounded-lg text-sm font-bold ${appMode === mode.id ? `${t.card} shadow-sm${t.text}` : t.sub}`}>{mode.name}</button>)}
                       </div>
                       
-                      {/* 🔥 글자 크기 설정 UI */}
                       <div className="flex items-center justify-between mt-2 pt-4 border-t border-gray-100 dark:border-gray-800">
                         <span className={`text-[15px] font-medium flex items-center gap-2 ${t.text}`}><Type size={16}/> 글자 크기</span>
                         <div className={`flex p-1 rounded-xl ${t.page}`}>
@@ -355,6 +408,7 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* 카테고리 설정은 생략 없이 이전과 동일합니다 */}
                   <div className="space-y-3">
                     <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>카테고리 관리</h3>
                     <div className={`p-4 rounded-2xl ${t.card} border ${t.border} space-y-3`}>
@@ -379,7 +433,6 @@ export default function Home() {
                     </div>
                   </div>
                   
-                  {/* 로그아웃 버튼 */}
                   <div className="pt-4">
                     <button onClick={() => supabase.auth.signOut()} className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-red-500 bg-red-50 hover:bg-red-100 font-bold transition-colors">
                       <LogOut size={18} /> 로그아웃
@@ -423,7 +476,7 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* ================= 일정 수정 / 이동 모달 ================= */}
+        {/* ================= 일정 수정 모달 ================= */}
         <AnimatePresence>
           {editingEvent && (
             <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
