@@ -49,7 +49,7 @@ export default function Home() {
   const [pointColor, setPointColor] = useState('#007AFF');
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [myNickname, setMyNickname] = useState('유저');
-  const [myAvatar, setMyAvatar] = useState<string>(''); // 🔥 프로필 사진 상태 추가
+  const [myAvatar, setMyAvatar] = useState<string>('');
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -132,7 +132,7 @@ export default function Home() {
     }
   }
 
-  // 🔥 프로필 사진 업로드 처리 (파일을 텍스트로 변환해서 바로 저장)
+  // 이미지 압축 및 처리
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -143,18 +143,17 @@ export default function Home() {
     }
   };
 
-  // 🔥 확실하게 저장하는 프로필 전용 저장 버튼
+  // 프로필 저장 함수 (저장 후 즉시 상단 목록 최신화)
   const saveProfileSettings = async () => {
     await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories }, { onConflict: 'user_id' });
+    await fetchAllProfiles();
     alert('✅ 프로필이 성공적으로 저장되었습니다!');
-    fetchAllProfiles();
   };
 
-  // 모달을 닫을 때도 혹시 모르니 저장은 해줌
   const closeSettingsAndSave = async () => {
     setIsSettingsOpen(false);
     await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories }, { onConflict: 'user_id' });
-    fetchAllProfiles();
+    await fetchAllProfiles();
   };
 
   async function fetchTodosFor(uid: string) {
@@ -301,9 +300,10 @@ export default function Home() {
 
         {/* ================= 우측 메인 영역 ================= */}
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
-          <div className="flex-1 overflow-y-auto px-6 pt-6 pb-24">
+          {/* 🔥 윗부분 여백(pt-4)을 주어서 프로필 동그라미가 잘리지 않도록 수정 완료! */}
+          <div className="flex-1 overflow-y-auto px-6 pt-4 pb-24">
             
-            {/* 🔥 크기 줄인 친구 프로필 바 */}
+            {/* 프로필 바 */}
             <div className="flex gap-3 overflow-x-auto pb-3 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
               {allUsers.map((u) => {
                 const isSelectedProfile = viewingUserId === u.user_id;
@@ -407,7 +407,6 @@ export default function Home() {
                     <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>내 프로필 & 테마</h3>
                     <div className={`p-4 rounded-2xl ${t.card} border ${t.border} flex flex-col gap-4`}>
                       
-                      {/* 🔥 프로필 사진 & 닉네임 설정 영역 (저장버튼 포함) */}
                       <div className="flex flex-col gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
                         <div className="flex items-center gap-4">
                           <div className="relative w-16 h-16 rounded-full overflow-hidden bg-gray-200 border-2 border-transparent hover:border-gray-300 transition-colors shrink-0">
