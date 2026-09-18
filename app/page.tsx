@@ -55,16 +55,15 @@ export default function Home() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<any>(null);
   
-  // 🔥 카테고리 속성에 isSecret 추가
   const [categories, setCategories] = useState([{ id: 1, name: '기본', color: '#60A5FA', isSecret: false }]);
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState('#FF9999');
-  const [newCatIsSecret, setNewCatIsSecret] = useState(false); // 새 카테고리 비밀 설정 여부
+  const [newCatIsSecret, setNewCatIsSecret] = useState(false);
   const [collapsedCats, setCollapsedCats] = useState<number[]>([]);
 
   const [inputTitle, setInputTitle] = useState('');
   const [selectedCategoryName, setSelectedCategoryName] = useState('');
-  const [isEventSecret, setIsEventSecret] = useState(false); // 🔥 새 일정 비밀 설정 여부
+  const [isEventSecret, setIsEventSecret] = useState(false);
   const [events, setEvents] = useState<any[]>([]);
 
   useEffect(() => {
@@ -127,7 +126,6 @@ export default function Home() {
         setMyAvatar(data.avatar_url || '');
       }
       if (data.categories && data.categories.length > 0) {
-        // 과거 데이터 호환성 (isSecret 없는 경우 false로 처리)
         const updatedCats = data.categories.map((c: any) => ({ ...c, isSecret: c.isSecret || false }));
         setCategories(updatedCats);
         setSelectedCategoryName(updatedCats[0].name);
@@ -179,7 +177,6 @@ export default function Home() {
   async function fetchTodosFor(uid: string) {
     const { data } = await supabase.from('todomate_todos').select('*').eq('user_id', uid).order('id', { ascending: true });
     if (data) {
-      // is_secret 상태를 가져와서 UI에 반영
       setEvents(data.map(d => ({ id: d.id, date: d.target_date ? new Date(d.target_date + 'T00:00:00') : new Date(), title: d.content, categoryName: d.category, isDone: d.is_completed, isSecret: d.is_secret })));
     } else {
       setEvents([]);
@@ -189,17 +186,10 @@ export default function Home() {
   const addEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputTitle.trim() || !selectedCategoryName) return;
-    
-    // 🔥 데이터베이스에 is_secret 상태까지 포함해서 전송
     const { error } = await supabase.from('todomate_todos').insert([{ 
       user_id: user.id, content: inputTitle, is_completed: false, category: selectedCategoryName, target_date: format(selectedDate, 'yyyy-MM-dd'), is_secret: isEventSecret 
     }]);
-    
-    if (error) {
-      alert("🚨 일정 저장 실패! 에러 내용: " + error.message);
-      return;
-    }
-
+    if (error) { alert("🚨 일정 저장 실패! 에러 내용: " + error.message); return; }
     setInputTitle(''); setIsEventSecret(false); setIsAddModalOpen(false); fetchTodosFor(user.id);
   };
 
@@ -234,10 +224,7 @@ export default function Home() {
     setCategories(newCats);
   };
   const deleteCategory = (id: number) => setCategories(categories.filter(c => c.id !== id));
-  
-  // 카테고리 비밀 여부 토글 함수
   const toggleCategorySecret = (id: number) => setCategories(categories.map(c => c.id === id ? { ...c, isSecret: !c.isSecret } : c));
-  
   const addCategory = () => { if (newCatName.trim()) { setCategories([...categories, { id: Date.now(), name: newCatName, color: newCatColor, isSecret: newCatIsSecret }]); setNewCatName(''); setNewCatIsSecret(false); } };
   const updateCategoryColor = (id: number, color: string) => setCategories(categories.map(c => c.id === id ? { ...c, color } : c));
   const toggleCollapse = (name: string) => setCollapsedCats(prev => prev.includes(name as any) ? prev.filter(n => n !== name as any) : [...prev, name as any]);
@@ -250,8 +237,6 @@ export default function Home() {
   const t = THEMES[appMode];
   const fs = FONT_SIZES[fontSize];
   const isMyProfile = viewingUserId === user?.id;
-
-  // 🔥 남의 프로필을 볼 때는 '비밀 카테고리'와 '비밀 일정'을 아예 필터링해서 숨김 처리
   const visibleCategories = isMyProfile ? categories : categories.filter(c => !c.isSecret);
   const visibleEvents = isMyProfile ? events : events.filter(e => !e.isSecret);
 
@@ -312,8 +297,6 @@ export default function Home() {
                 const isSelected = isSameDay(date, selectedDate);
                 const isToday = isSameDay(date, new Date());
                 const isCurrentMonth = isSameMonth(date, currentDate);
-                
-                // 달력 점 표시도 비밀 일정을 숨긴 채로 렌더링
                 const dayEvents = visibleEvents.filter(e => isSameDay(e.date, date));
                 const holiday = getHoliday(date);
                 const isRedDay = holiday || date.getDay() === 0;
@@ -374,9 +357,7 @@ export default function Home() {
             </h2>
             
             <div className="space-y-6">
-              {/* 보이는 카테고리만 매핑 */}
               {visibleCategories.map((cat) => {
-                // 보이는 일정 중에서 이 카테고리에 속한 것만 필터링
                 const dayEvents = visibleEvents.filter(e => isSameDay(e.date, selectedDate) && e.categoryName === cat.name);
                 const sortedEvents = [...dayEvents].sort((a, b) => Number(a.isDone) - Number(b.isDone));
                 const isCollapsed = collapsedCats.includes(cat.name as any);
@@ -399,24 +380,25 @@ export default function Home() {
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden space-y-2 ml-1">
                           {sortedEvents.map(ev => (
                             <motion.div layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={ev.id} className={`group flex items-center gap-3 p-3.5 rounded-xl border ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'}`}>
+                              
+                              {/* 체크박스 */}
                               <div onClick={() => toggleEvent(ev.id, ev.isDone)} className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 ${isMyProfile ? 'cursor-pointer' : 'cursor-default'}`} style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
                                 {ev.isDone && <Check size={12} className="text-white" />}
                               </div>
-                              <div onClick={() => isMyProfile && setEditingEvent(ev)} className={`flex-1 flex items-center gap-2 ${isMyProfile ? 'cursor-pointer hover:opacity-70' : 'cursor-default'}`}>
-                                <span className={`${fs} font-medium ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
-                                {/* 비밀 일정 아이콘 */}
-                                {ev.isSecret && <Lock size={14} className="text-gray-400" title="나만 보기" />}
+                              
+                              {/* 글씨 영역 (클릭하면 무조건 수정 모달 열림) */}
+                              <div onClick={() => isMyProfile && setEditingEvent(ev)} className={`flex-1 flex items-center gap-2 min-w-0 py-1 ${isMyProfile ? 'cursor-pointer hover:opacity-70' : 'cursor-default'}`}>
+                                <span className={`${fs} font-medium truncate ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
+                                {ev.isSecret && <Lock size={14} className="text-gray-400 shrink-0" title="나만 보기" />}
                               </div>
                               
+                              {/* 🔥 모바일에서도 투명해지지 않고 항상 보이게 수정한 퀵 액션 버튼들! */}
                               {isMyProfile && (
-                                <>
-                                  <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-1 transition-opacity">
-                                    <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 text-gray-400 hover:text-blue-500" title="오늘 하기"><CalendarDays size={16} /></button>
-                                    <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, addDays(new Date(), 1)); }} className="p-1.5 text-gray-400 hover:text-orange-400" title="내일로 미루기"><ArrowRight size={16} /></button>
-                                    <button onClick={(e) => deleteEvent(ev.id, e)} className="p-1.5 text-gray-400 hover:text-red-400"><Trash2 size={16} /></button>
-                                  </div>
-                                  <button onClick={(e) => deleteEvent(ev.id, e)} className="md:hidden p-1.5 text-gray-300"><Trash2 size={16} /></button>
-                                </>
+                                <div className="flex items-center gap-1 shrink-0 text-gray-400 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                  <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors" title="오늘 하기"><CalendarDays size={16} /></button>
+                                  <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, addDays(new Date(), 1)); }} className="p-1.5 hover:text-orange-500 hover:bg-orange-50 rounded-md transition-colors" title="미루기"><ArrowRight size={16} /></button>
+                                  <button onClick={(e) => deleteEvent(ev.id, e)} className="p-1.5 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="삭제"><Trash2 size={16} /></button>
+                                </div>
                               )}
                             </motion.div>
                           ))}
@@ -509,7 +491,6 @@ export default function Home() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1">
-                            {/* 🔥 카테고리 비밀 여부 토글 버튼 */}
                             <button onClick={() => toggleCategorySecret(cat.id)} className={`p-1.5 rounded-md transition-colors ${cat.isSecret ? 'text-blue-500 bg-blue-50' : `text-gray-300 hover:${t.page}`}`} title="나만 보기">
                               {cat.isSecret ? <Lock size={16} /> : <Unlock size={16} />}
                             </button>
@@ -521,7 +502,6 @@ export default function Home() {
                         </div>
                       ))}
                       
-                      {/* 새 카테고리 추가 영역 */}
                       <div className={`flex items-center gap-2 pt-3 mt-3 border-t ${t.border}`}>
                         <div className="relative w-8 h-8 rounded-lg overflow-hidden border border-gray-200 shrink-0"><input type="color" value={newCatColor} onChange={(e) => setNewCatColor(e.target.value)} className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer" /></div>
                         <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="새 카테고리 이름" className={`flex-1 min-w-0 bg-transparent outline-none text-[15px] ${t.text} placeholder:${t.sub}`} />
@@ -558,7 +538,6 @@ export default function Home() {
                 <form onSubmit={addEvent} className="flex flex-col gap-6">
                   <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm flex items-center gap-3`}>
                     <input type="text" autoFocus value={inputTitle} onChange={(e) => setInputTitle(e.target.value)} placeholder="일정 제목을 입력하세요" className={`flex-1 text-lg bg-transparent outline-none ${t.text} placeholder:${t.sub}`} />
-                    {/* 🔥 개별 일정 비밀 토글 버튼 */}
                     <button type="button" onClick={() => setIsEventSecret(!isEventSecret)} className={`p-2 rounded-xl transition-colors ${isEventSecret ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`} title="나만 보기">
                       {isEventSecret ? <Lock size={20} /> : <Unlock size={20} />}
                     </button>
@@ -593,8 +572,10 @@ export default function Home() {
                 </div>
                 <form onSubmit={updateEvent} className="flex flex-col gap-4">
                   <div className="flex items-center justify-between gap-2">
-                    <input type="date" value={format(editingEvent.date, 'yyyy-MM-dd')} onChange={(e) => setEditingEvent({...editingEvent, date: new Date(e.target.value)})} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.bg} ${t.text} font-medium outline-none shrink-0`} />
+                    {/* 날짜가 꼬이지 않도록 안전장치 T00:00:00 추가 */}
+                    <input type="date" value={format(editingEvent.date, 'yyyy-MM-dd')} onChange={(e) => setEditingEvent({...editingEvent, date: new Date(e.target.value + 'T00:00:00')})} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.bg} ${t.text} font-medium outline-none shrink-0`} />
                     <div className="flex gap-2">
+                      {/* 🔥 여기에도 "오늘 하기 / 미루기" 버튼이 완벽하게 돌아왔습니다! */}
                       <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, new Date()); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors`}>오늘 하기</button>
                       <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, addDays(new Date(), 1)); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-orange-50 text-orange-500 hover:bg-orange-100 transition-colors`}>미루기</button>
                     </div>
