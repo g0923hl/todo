@@ -109,7 +109,7 @@ export default function Home() {
   };
 
   async function fetchSettingsFor(uid: string) {
-    const { data } = await supabase.from('todomate_settings').select('*').eq('user_id', uid).single();
+    const { data } = await supabase.from('todomate_settings').select('*').eq('user_id', uid).maybeSingle();
     if (data) {
       setAppMode(data.app_mode || 'light');
       setPointColor(data.point_color || '#007AFF');
@@ -123,6 +123,7 @@ export default function Home() {
         setSelectedCategoryName(data.categories[0].name);
       }
     } else if (uid === user?.id) {
+      // 데이터가 없으면 새로 만들어줌
       const defaultNick = user.email?.split('@')[0] || '유저';
       await supabase.from('todomate_settings').insert([{ user_id: uid, app_mode: 'light', point_color: '#007AFF', font_size: 'md', nickname: defaultNick, avatar_url: '', categories }]);
       setMyNickname(defaultNick);
@@ -142,17 +143,33 @@ export default function Home() {
     }
   };
 
-  // 🔥 확실하게 저장하고 즉시 화면 프로필 목록 갱신하기
-  const saveProfileSettings = async () => {
-    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories }, { onConflict: 'user_id' });
+  // 🔥 깐깐한 제한 없이 무조건 저장되도록 수정된 "마법의 저장 함수"
+  const performSave = async () => {
+    if (!user) return;
+    const payload = { app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories };
+    
+    // 1. 내 설정 데이터가 이미 있는지 확인
+    const { data } = await supabase.from('todomate_settings').select('id').eq('user_id', user.id).maybeSingle();
+    
+    // 2. 있으면 무조건 덮어쓰기 (update), 없으면 무조건 새로 만들기 (insert)
+    if (data) {
+      await supabase.from('todomate_settings').update(payload).eq('user_id', user.id);
+    } else {
+      await supabase.from('todomate_settings').insert([{ user_id: user.id, ...payload }]);
+    }
+    
+    // 3. 최신 프로필 목록 실시간 업데이트
     await fetchAllProfiles();
-    alert('✅ 프로필이 성공적으로 저장되었습니다!');
+  };
+
+  const saveProfileSettings = async () => {
+    await performSave();
+    alert('✅ 프로필이 성공적으로 반영되었습니다!');
   };
 
   const closeSettingsAndSave = async () => {
+    await performSave();
     setIsSettingsOpen(false);
-    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories }, { onConflict: 'user_id' });
-    await fetchAllProfiles();
   };
 
   async function fetchTodosFor(uid: string) {
@@ -241,7 +258,6 @@ export default function Home() {
 
   return (
     <main className={`min-h-screen ${t.page} flex items-center justify-center font-sans antialiased md:p-6 transition-colors duration-300`}>
-      {/* 🔥 메인 박스 전체에 py-4를 주어 상단 프로필 동그라미가 절대 잘리지 않도록 안전 공간 확보 */}
       <div className={`w-full max-w-none md:max-w-4xl lg:max-w-5xl h-[100dvh] md:h-[85vh] ${t.bg} md:rounded-[32px] shadow-2xl flex flex-col md:flex-row relative overflow-hidden transition-colors duration-300`}>
         
         {/* ================= 좌측 사이드바 ================= */}
@@ -300,9 +316,9 @@ export default function Home() {
 
         {/* ================= 우측 메인 영역 ================= */}
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
-          <div className="flex-1 overflow-y-auto px-6 pt-6 pb-24">
+          <div className="flex-1 overflow-y-auto px-6 pt-4 pb-24">
             
-            {/* 🔥 상단 친구 프로필 바 (동그라미가 카드 안쪽으로 완전히 들어오도록 배치) */}
+            {/* 프로필 바 */}
             <div className="flex gap-3 overflow-x-auto pb-3 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
               {allUsers.map((u) => {
                 const isSelectedProfile = viewingUserId === u.user_id;
@@ -394,7 +410,7 @@ export default function Home() {
           {isSettingsOpen && (
             <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeSettingsAndSave} className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" />
-              <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[480px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl max-h-[85vh] flex flex-col pointer-events-auto relative z-10`}>
+              <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[480px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl max-h-[85vh] flex flex-col pointer-events-auto relative z-10`}>
                 <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6 md:hidden" />
                 <div className="flex justify-between items-center mb-6">
                   <h2 className={`text-xl font-bold ${t.text}`}>앱 설정</h2>
