@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { format, addMonths, subMonths, addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isSameMonth, isSameDay } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight, LogOut, Type, UserRound } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight, LogOut, Type, UserRound, Camera } from 'lucide-react';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -34,7 +34,6 @@ export default function Home() {
   const [isClient, setIsClient] = useState(false);
   const [user, setUser] = useState<any>(null);
   
-  // 🔥 소셜 기능 상태
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [viewingUserId, setViewingUserId] = useState<string>('');
   
@@ -50,6 +49,7 @@ export default function Home() {
   const [pointColor, setPointColor] = useState('#007AFF');
   const [fontSize, setFontSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [myNickname, setMyNickname] = useState('유저');
+  const [myAvatar, setMyAvatar] = useState<string>(''); // 🔥 프로필 사진 상태 추가
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -79,7 +79,6 @@ export default function Home() {
     }
   }, [user]);
 
-  // 친구를 선택하면 그 사람의 데이터로 화면이 바뀝니다!
   useEffect(() => {
     if (viewingUserId) {
       fetchSettingsFor(viewingUserId);
@@ -88,7 +87,7 @@ export default function Home() {
   }, [viewingUserId]);
 
   const fetchAllProfiles = async () => {
-    const { data } = await supabase.from('todomate_settings').select('user_id, nickname, point_color').not('user_id', 'is', null);
+    const { data } = await supabase.from('todomate_settings').select('user_id, nickname, point_color, avatar_url').not('user_id', 'is', null);
     if (data) setAllUsers(data);
   };
 
@@ -115,24 +114,47 @@ export default function Home() {
       setAppMode(data.app_mode || 'light');
       setPointColor(data.point_color || '#007AFF');
       setFontSize(data.font_size || 'md');
-      if (uid === user?.id) setMyNickname(data.nickname || user.email?.split('@')[0] || '유저');
+      if (uid === user?.id) {
+        setMyNickname(data.nickname || user.email?.split('@')[0] || '유저');
+        setMyAvatar(data.avatar_url || '');
+      }
       if (data.categories && data.categories.length > 0) {
         setCategories(data.categories);
         setSelectedCategoryName(data.categories[0].name);
       }
     } else if (uid === user?.id) {
       const defaultNick = user.email?.split('@')[0] || '유저';
-      await supabase.from('todomate_settings').insert([{ user_id: uid, app_mode: 'light', point_color: '#007AFF', font_size: 'md', nickname: defaultNick, categories }]);
+      await supabase.from('todomate_settings').insert([{ user_id: uid, app_mode: 'light', point_color: '#007AFF', font_size: 'md', nickname: defaultNick, avatar_url: '', categories }]);
       setMyNickname(defaultNick);
+      setMyAvatar('');
       setSelectedCategoryName(categories[0].name);
-      fetchAllProfiles(); // 새 프로필 목록 갱신
+      fetchAllProfiles(); 
     }
   }
 
+  // 🔥 프로필 사진 업로드 처리 (파일을 텍스트로 변환해서 바로 저장)
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) { alert('이미지 용량이 너무 큽니다. (2MB 이하 사진을 선택해주세요)'); return; }
+      const reader = new FileReader();
+      reader.onloadend = () => { setMyAvatar(reader.result as string); };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // 🔥 확실하게 저장하는 프로필 전용 저장 버튼
+  const saveProfileSettings = async () => {
+    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories }, { onConflict: 'user_id' });
+    alert('✅ 프로필이 성공적으로 저장되었습니다!');
+    fetchAllProfiles();
+  };
+
+  // 모달을 닫을 때도 혹시 모르니 저장은 해줌
   const closeSettingsAndSave = async () => {
     setIsSettingsOpen(false);
-    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, categories }, { onConflict: 'user_id' });
-    fetchAllProfiles(); // 설정 저장 후 프로필 바 갱신
+    await supabase.from('todomate_settings').upsert({ user_id: user.id, app_mode: appMode, point_color: pointColor, font_size: fontSize, nickname: myNickname, avatar_url: myAvatar, categories }, { onConflict: 'user_id' });
+    fetchAllProfiles();
   };
 
   async function fetchTodosFor(uid: string) {
@@ -152,7 +174,7 @@ export default function Home() {
   };
 
   const toggleEvent = async (id: number, currentStatus: boolean) => {
-    if (viewingUserId !== user?.id) return; // 내 프로필이 아니면 체크 금지!
+    if (viewingUserId !== user?.id) return;
     setEvents(events.map(ev => ev.id === id ? { ...ev, isDone: !currentStatus } : ev));
     await supabase.from('todomate_todos').update({ is_completed: !currentStatus }).eq('id', id);
   };
@@ -193,7 +215,7 @@ export default function Home() {
 
   const t = THEMES[appMode];
   const fs = FONT_SIZES[fontSize];
-  const isMyProfile = viewingUserId === user?.id; // 현재 화면이 내 화면인지 여부
+  const isMyProfile = viewingUserId === user?.id;
 
   if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>;
 
@@ -281,18 +303,22 @@ export default function Home() {
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
           <div className="flex-1 overflow-y-auto px-6 pt-6 pb-24">
             
-            {/* 🔥 친구 프로필 바 (새로 추가됨) */}
-            <div className="flex gap-4 overflow-x-auto pb-4 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
+            {/* 🔥 크기 줄인 친구 프로필 바 */}
+            <div className="flex gap-3 overflow-x-auto pb-3 mb-4 border-b border-gray-200/50 dark:border-gray-800/50 hide-scrollbar shrink-0">
               {allUsers.map((u) => {
                 const isSelectedProfile = viewingUserId === u.user_id;
                 const displayName = u.nickname || '유저';
                 return (
-                  <div key={u.user_id} onClick={() => setViewingUserId(u.user_id)} className="flex flex-col items-center gap-1.5 cursor-pointer group shrink-0">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm transition-all duration-300 ${isSelectedProfile ? 'outline outline-3 outline-offset-2' : 'opacity-70 group-hover:opacity-100 group-hover:scale-105'}`}
+                  <div key={u.user_id} onClick={() => setViewingUserId(u.user_id)} className="flex flex-col items-center gap-1 cursor-pointer group shrink-0">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-base shadow-sm transition-all duration-300 overflow-hidden ${isSelectedProfile ? 'outline outline-3 outline-offset-2' : 'opacity-70 group-hover:opacity-100 group-hover:scale-105'}`}
                          style={{ backgroundColor: u.point_color || '#ccc', outlineColor: isSelectedProfile ? u.point_color : 'transparent' }}>
-                      {displayName.substring(0, 1)}
+                      {u.avatar_url ? (
+                        <img src={u.avatar_url} alt="profile" className="w-full h-full object-cover" />
+                      ) : (
+                        displayName.substring(0, 1)
+                      )}
                     </div>
-                    <span className={`text-[11px] font-bold ${isSelectedProfile ? t.text : t.sub}`}>{displayName} {u.user_id === user.id && '(나)'}</span>
+                    <span className={`text-[10px] font-bold ${isSelectedProfile ? t.text : t.sub}`}>{displayName} {u.user_id === user.id && '(나)'}</span>
                   </div>
                 );
               })}
@@ -305,7 +331,6 @@ export default function Home() {
                   {format(selectedDate, 'EEEE')} {getHoliday(selectedDate) && `· ${getHoliday(selectedDate)}`}
                 </span>
               </div>
-              {/* 내 프로필이 아닐 때 보여주는 뱃지 */}
               {!isMyProfile && <span className="text-xs font-bold bg-blue-500 text-white px-2 py-1 rounded-md">친구 일정 (읽기전용)</span>}
             </h2>
             
@@ -337,7 +362,6 @@ export default function Home() {
                               </div>
                               <span onClick={() => isMyProfile && setEditingEvent(ev)} className={`${fs} font-medium flex-1 ${isMyProfile ? 'cursor-pointer hover:opacity-70' : 'cursor-default'} ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
                               
-                              {/* 내 일정일 때만 호버/삭제 버튼이 보임 */}
                               {isMyProfile && (
                                 <>
                                   <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-1 transition-opacity">
@@ -359,7 +383,6 @@ export default function Home() {
             </div>
           </div>
           
-          {/* 내 프로필 화면일 때만 일정 추가 버튼(+) 노출 */}
           {isMyProfile && (
             <div className="absolute bottom-6 right-6 md:bottom-8 md:right-8 z-20">
               <button onClick={() => setIsAddModalOpen(true)} style={{ backgroundColor: pointColor }} className="w-14 h-14 rounded-full shadow-xl flex items-center justify-center text-white hover:scale-105 active:scale-95 transition-transform"><Plus size={28} /></button>
@@ -384,10 +407,28 @@ export default function Home() {
                     <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>내 프로필 & 테마</h3>
                     <div className={`p-4 rounded-2xl ${t.card} border ${t.border} flex flex-col gap-4`}>
                       
-                      {/* 🔥 닉네임 설정 */}
-                      <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
-                        <span className={`text-[15px] font-medium flex items-center gap-2 ${t.text}`}><UserRound size={16}/> 닉네임</span>
-                        <input type="text" value={myNickname} onChange={(e) => setMyNickname(e.target.value)} className={`text-right bg-transparent outline-none font-bold ${t.text} border-b focus:border-blue-500 w-32`} placeholder="닉네임 입력" />
+                      {/* 🔥 프로필 사진 & 닉네임 설정 영역 (저장버튼 포함) */}
+                      <div className="flex flex-col gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
+                        <div className="flex items-center gap-4">
+                          <div className="relative w-16 h-16 rounded-full overflow-hidden bg-gray-200 border-2 border-transparent hover:border-gray-300 transition-colors shrink-0">
+                            {myAvatar ? (
+                              <img src={myAvatar} alt="avatar" className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-gray-400"><UserRound size={24}/></div>
+                            )}
+                            <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" title="프로필 사진 변경" />
+                            <div className="absolute bottom-0 inset-x-0 h-1/3 bg-black/40 flex items-center justify-center pointer-events-none">
+                              <Camera size={12} className="text-white"/>
+                            </div>
+                          </div>
+                          
+                          <div className="flex flex-col flex-1 gap-2">
+                            <input type="text" value={myNickname} onChange={(e) => setMyNickname(e.target.value)} className={`bg-transparent outline-none font-bold text-lg ${t.text} border-b border-gray-200 dark:border-gray-700 focus:border-blue-500`} placeholder="닉네임 입력" />
+                            <button onClick={saveProfileSettings} className="px-3 py-1.5 bg-blue-500 text-white text-xs font-bold rounded-lg self-start shadow-sm hover:bg-blue-600 active:scale-95 transition-all">
+                              저장하기
+                            </button>
+                          </div>
+                        </div>
                       </div>
 
                       <div className={`flex p-1 rounded-xl ${t.page}`}>
@@ -408,7 +449,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* 카테고리 설정은 생략 없이 이전과 동일합니다 */}
                   <div className="space-y-3">
                     <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>카테고리 관리</h3>
                     <div className={`p-4 rounded-2xl ${t.card} border ${t.border} space-y-3`}>
