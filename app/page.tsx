@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { format, addMonths, subMonths, addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isSameMonth, isSameDay } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight } from 'lucide-react';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -16,6 +16,19 @@ const THEMES = {
   dark: { page: 'bg-black', bg: 'bg-[#1C1C1E]', text: 'text-white', sub: 'text-gray-400', border: 'border-[#38383A]', card: 'bg-[#2C2C2E]' },
   pastel: { page: 'bg-[#F5F3EC]', bg: 'bg-[#FDFBF7]', text: 'text-[#5C5C5C]', sub: 'text-[#9C9C9C]', border: 'border-[#F0EBE1]', card: 'bg-white' },
 };
+
+// 🇰🇷 한국 주요 공휴일 데이터 (양력 고정 + 2026/2027 명절)
+const HOLIDAYS: Record<string, string> = {
+  '01-01': '신정', '03-01': '삼일절', '05-05': '어린이날', '06-06': '현충일',
+  '08-15': '광복절', '10-03': '개천절', '10-09': '한글날', '12-25': '성탄절',
+  '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴',
+  '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일',
+  '2026-08-17': '대체공휴일',
+  '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴',
+  '2027-02-06': '설날 연휴', '2027-02-07': '설날', '2027-02-08': '설날 연휴', '2027-02-09': '대체공휴일',
+  '2027-05-13': '부처님오신날', '2027-09-14': '추석 연휴', '2027-09-15': '추석', '2027-09-16': '추석 연휴'
+};
+const getHoliday = (d: Date) => HOLIDAYS[format(d, 'yyyy-MM-dd')] || HOLIDAYS[format(d, 'MM-dd')];
 
 export default function Home() {
   const [isClient, setIsClient] = useState(false);
@@ -29,6 +42,7 @@ export default function Home() {
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<any>(null); // 🔥 일정 수정용 상태 추가
   
   const [categories, setCategories] = useState([
     { id: 1, name: '마케팅', color: '#60A5FA' },
@@ -58,14 +72,12 @@ export default function Home() {
 
   const t = THEMES[appMode];
 
-  // 1. 처음 켜질 때 DB에서 모든 정보(할 일 + 앱 설정) 불러오기
   useEffect(() => {
     setIsClient(true);
     fetchSettings();
     fetchTodos();
   }, []);
 
-  // 클라우드에서 테마/카테고리 불러오기
   async function fetchSettings() {
     const { data } = await supabase.from('todomate_settings').select('*').eq('id', 1).single();
     if (data) {
@@ -76,39 +88,26 @@ export default function Home() {
         setSelectedCategoryName(data.categories[0].name);
       }
     } else {
-      // 처음 접속 시 기본값 저장해두기
-      await supabase.from('todomate_settings').insert([{
-        id: 1,
-        app_mode: 'light',
-        point_color: '#007AFF',
-        categories: categories
-      }]);
+      await supabase.from('todomate_settings').insert([{ id: 1, app_mode: 'light', point_color: '#007AFF', categories }]);
       setSelectedCategoryName(categories[0].name);
     }
   }
 
-  // 설정창을 닫을 때 현재 테마/카테고리 상태를 클라우드에 영구 저장!
   const closeSettingsAndSave = async () => {
     setIsSettingsOpen(false);
-    await supabase.from('todomate_settings').upsert({
-      id: 1,
-      app_mode: appMode,
-      point_color: pointColor,
-      categories: categories
-    });
+    await supabase.from('todomate_settings').upsert({ id: 1, app_mode: appMode, point_color: pointColor, categories });
   };
 
   async function fetchTodos() {
     const { data } = await supabase.from('todomate_todos').select('*').order('id', { ascending: true });
     if (data) {
-      const mappedData = data.map(d => ({
+      setEvents(data.map(d => ({
         id: d.id,
         date: d.target_date ? new Date(d.target_date) : new Date(),
         title: d.content,
         categoryName: d.category,
         isDone: d.is_completed
-      }));
-      setEvents(mappedData);
+      })));
     }
   }
 
@@ -124,12 +123,29 @@ export default function Home() {
   const toggleEvent = async (id: number, currentStatus: boolean) => {
     setEvents(events.map(ev => ev.id === id ? { ...ev, isDone: !currentStatus } : ev));
     await supabase.from('todomate_todos').update({ is_completed: !currentStatus }).eq('id', id);
-    fetchTodos();
   };
 
   const deleteEvent = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     await supabase.from('todomate_todos').delete().eq('id', id);
+    fetchTodos();
+  };
+
+  // 🔥 일정 빠른 이동 (오늘/내일) 및 수정 기능
+  const quickMoveEvent = async (id: number, targetDate: Date) => {
+    await supabase.from('todomate_todos').update({ target_date: format(targetDate, 'yyyy-MM-dd') }).eq('id', id);
+    fetchTodos();
+  };
+
+  const updateEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent.title.trim()) return;
+    await supabase.from('todomate_todos').update({
+      content: editingEvent.title,
+      category: editingEvent.categoryName,
+      target_date: format(editingEvent.date, 'yyyy-MM-dd')
+    }).eq('id', editingEvent.id);
+    setEditingEvent(null);
     fetchTodos();
   };
 
@@ -139,16 +155,8 @@ export default function Home() {
     else if (dir === 'down' && index < newCats.length - 1) [newCats[index], newCats[index + 1]] = [newCats[index + 1], newCats[index]];
     setCategories(newCats);
   };
-
   const deleteCategory = (id: number) => setCategories(categories.filter(c => c.id !== id));
-  
-  const addCategory = () => {
-    if (newCatName.trim()) {
-      setCategories([...categories, { id: Date.now(), name: newCatName, color: newCatColor }]);
-      setNewCatName('');
-    }
-  };
-
+  const addCategory = () => { if (newCatName.trim()) { setCategories([...categories, { id: Date.now(), name: newCatName, color: newCatColor }]); setNewCatName(''); } };
   const updateCategoryColor = (id: number, color: string) => setCategories(categories.map(c => c.id === id ? { ...c, color } : c));
   const toggleCollapse = (name: string) => setCollapsedCats(prev => prev.includes(name as any) ? prev.filter(n => n !== name as any) : [...prev, name as any]);
 
@@ -180,7 +188,7 @@ export default function Home() {
 
           <div className="px-4 pb-4 shrink-0">
             <div className="grid grid-cols-7 mb-2">
-              {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => <div key={d} className={`text-center text-[11px] font-semibold ${i === 0 || i === 6 ? 'text-red-400/70' : t.sub}`}>{d}</div>)}
+              {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => <div key={d} className={`text-center text-[11px] font-semibold ${i === 0 ? 'text-red-400/80' : i === 6 ? 'text-blue-400/80' : t.sub}`}>{d}</div>)}
             </div>
             <div className="grid grid-cols-7 gap-y-3">
               {days.map((date, i) => {
@@ -188,11 +196,18 @@ export default function Home() {
                 const isToday = isSameDay(date, new Date());
                 const isCurrentMonth = isSameMonth(date, currentDate);
                 const dayEvents = events.filter(e => isSameDay(e.date, date));
+                const holiday = getHoliday(date);
+                const isRedDay = holiday || date.getDay() === 0; // 공휴일이거나 일요일이면 빨간색
+
                 return (
-                  <div key={i} onClick={() => setSelectedDate(date)} className="flex flex-col items-center cursor-pointer h-10 relative">
-                    <div className={`w-7 h-7 flex items-center justify-center rounded-full text-[14px] transition-colors ${isSelected ? 'text-white font-bold shadow-md' : isToday ? 'font-bold' : isCurrentMonth ? t.text : t.sub}`} style={{ backgroundColor: isSelected ? pointColor : 'transparent', color: isToday && !isSelected ? pointColor : undefined }}>
+                  <div key={i} onClick={() => setSelectedDate(date)} className="flex flex-col items-center cursor-pointer h-10 relative group">
+                    <div className={`w-7 h-7 flex items-center justify-center rounded-full text-[14px] transition-colors
+                      ${isSelected ? 'text-white font-bold shadow-md' : isToday ? 'font-bold' : isRedDay && isCurrentMonth ? 'text-red-500 font-medium' : isCurrentMonth ? t.text : t.sub}`} 
+                      style={{ backgroundColor: isSelected ? pointColor : 'transparent', color: (isToday && !isSelected) ? pointColor : undefined }}>
                       {format(date, 'd')}
                     </div>
+                    {/* 공휴일 툴팁 (PC 호버 시 표시) */}
+                    {holiday && <div className="absolute -top-6 bg-black/70 text-white text-[10px] px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">{holiday}</div>}
                     <div className="flex gap-0.5 mt-0.5 absolute bottom-0">
                       {dayEvents.slice(0, 3).map((ev, idx) => {
                         const cat = categories.find(c => c.name === ev.categoryName);
@@ -209,7 +224,12 @@ export default function Home() {
         {/* ================= 우측 메인 영역 ================= */}
         <section className={`flex-1 flex flex-col relative ${t.page} md:bg-transparent overflow-hidden`}>
           <div className="flex-1 overflow-y-auto px-6 pt-6 pb-24">
-            <h2 className={`text-lg font-bold mb-6 flex items-center gap-2 ${t.text}`}>{format(selectedDate, 'M월 d일')} <span className={`font-medium text-sm ${t.sub}`}>{format(selectedDate, 'EEEE')}</span></h2>
+            <h2 className={`text-lg font-bold mb-6 flex items-center gap-2 ${t.text}`}>
+              {format(selectedDate, 'M월 d일')} 
+              <span className={`font-medium text-sm ${(getHoliday(selectedDate) || selectedDate.getDay() === 0) ? 'text-red-500' : t.sub}`}>
+                {format(selectedDate, 'EEEE')} {getHoliday(selectedDate) && `· ${getHoliday(selectedDate)}`}
+              </span>
+            </h2>
             
             <div className="space-y-6">
               {categories.map((cat) => {
@@ -233,12 +253,21 @@ export default function Home() {
                       {!isCollapsed && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden space-y-2 ml-1">
                           {sortedEvents.map(ev => (
-                            <motion.div layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={ev.id} onClick={() => toggleEvent(ev.id, ev.isDone)} className={`group flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'}`}>
-                              <div className="w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0" style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
+                            // 🔥 여기서 일정을 클릭하면 '수정 모달'이 열리게 바뀝니다
+                            <motion.div layout initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} key={ev.id} className={`group flex items-center gap-3 p-3.5 rounded-xl border ${t.card} ${t.border} ${ev.isDone ? 'opacity-60 bg-gray-50/50' : 'shadow-sm'}`}>
+                              <div onClick={() => toggleEvent(ev.id, ev.isDone)} className="w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 cursor-pointer" style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
                                 {ev.isDone && <Check size={12} className="text-white" />}
                               </div>
-                              <span className={`text-[15px] font-medium flex-1 ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
-                              <button onClick={(e) => deleteEvent(ev.id, e)} className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-300 hover:text-red-400 transition-opacity"><Trash2 size={16} /></button>
+                              <span onClick={() => setEditingEvent(ev)} className={`text-[15px] font-medium flex-1 cursor-pointer hover:opacity-70 ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
+                              
+                              {/* PC에서 마우스를 올렸을 때 보이는 빠른 액션 아이콘들 */}
+                              <div className="opacity-0 md:group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                                <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, new Date()); }} className="p-1.5 text-gray-400 hover:text-blue-500" title="오늘 하기"><CalendarDays size={16} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); quickMoveEvent(ev.id, addDays(new Date(), 1)); }} className="p-1.5 text-gray-400 hover:text-orange-400" title="내일로 미루기"><ArrowRight size={16} /></button>
+                                <button onClick={(e) => deleteEvent(ev.id, e)} className="p-1.5 text-gray-400 hover:text-red-400"><Trash2 size={16} /></button>
+                              </div>
+                              {/* 모바일용 항상 보이는 삭제 버튼 (스와이프 대신 간편하게) */}
+                              <button onClick={(e) => deleteEvent(ev.id, e)} className="md:hidden p-1.5 text-gray-300"><Trash2 size={16} /></button>
                             </motion.div>
                           ))}
                         </motion.div>
@@ -254,7 +283,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ================= 설정 모달 ================= */}
+        {/* ================= (생략 없이 포함됨) 설정 모달 ================= */}
         <AnimatePresence>
           {isSettingsOpen && (
             <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
@@ -326,24 +355,59 @@ export default function Home() {
                     <p className={`text-xs font-bold mb-3 ml-1 ${t.sub}`}>어느 카테고리에 추가할까요?</p>
                     <div className="flex flex-wrap gap-2">
                       {categories.map((cat) => (
-                        <button
-                          key={cat.id} type="button" onClick={() => setSelectedCategoryName(cat.name)}
-                          className={`px-4 py-2 rounded-xl text-[13px] font-bold transition-all border ${selectedCategoryName === cat.name ? 'text-white border-transparent shadow-md' : `${t.text}${t.border}`}`}
-                          style={{ backgroundColor: selectedCategoryName === cat.name ? cat.color : 'transparent' }}
-                        >
+                        <button key={cat.id} type="button" onClick={() => setSelectedCategoryName(cat.name)} className={`px-4 py-2 rounded-xl text-[13px] font-bold transition-all border ${selectedCategoryName === cat.name ? 'text-white border-transparent shadow-md' : `${t.text}${t.border}`}`} style={{ backgroundColor: selectedCategoryName === cat.name ? cat.color : 'transparent' }}>
                           {cat.name}
                         </button>
                       ))}
                     </div>
                   </div>
-                  <button type="submit" style={{ backgroundColor: pointColor }} className="w-full py-4 rounded-2xl font-bold text-white text-lg active:scale-[0.98] transition-transform shadow-lg">
-                    추가하기
-                  </button>
+                  <button type="submit" style={{ backgroundColor: pointColor }} className="w-full py-4 rounded-2xl font-bold text-white text-lg active:scale-[0.98] transition-transform shadow-lg">추가하기</button>
                 </form>
               </motion.div>
             </div>
           )}
         </AnimatePresence>
+
+        {/* ================= 🔥 일정 수정 / 이동 모달 ================= */}
+        <AnimatePresence>
+          {editingEvent && (
+            <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEditingEvent(null)} className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" />
+              <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[440px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl flex flex-col pointer-events-auto relative z-10`}>
+                <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6 md:hidden" />
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className={`text-xl font-bold ${t.text}`}>일정 수정</h2>
+                  <button onClick={() => setEditingEvent(null)} className={`p-1.5 rounded-full ${t.card} border ${t.border} ${t.sub}`}><X size={20} /></button>
+                </div>
+                <form onSubmit={updateEvent} className="flex flex-col gap-4">
+                  {/* 날짜 선택 및 퀵 액션 (오늘하기/미루기) */}
+                  <div className="flex items-center justify-between gap-2">
+                    <input type="date" value={format(editingEvent.date, 'yyyy-MM-dd')} onChange={(e) => setEditingEvent({...editingEvent, date: new Date(e.target.value)})} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.bg} ${t.text} font-medium outline-none shrink-0`} />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, new Date()); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors`}>오늘 하기</button>
+                      <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, addDays(new Date(), 1)); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-orange-50 text-orange-500 hover:bg-orange-100 transition-colors`}>내일로 미루기</button>
+                    </div>
+                  </div>
+                  <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm mt-2`}>
+                    <input type="text" autoFocus value={editingEvent.title} onChange={(e) => setEditingEvent({...editingEvent, title: e.target.value})} placeholder="일정 제목" className={`w-full text-lg bg-transparent outline-none ${t.text} placeholder:${t.sub}`} />
+                  </div>
+                  <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm`}>
+                    <p className={`text-xs font-bold mb-3 ml-1 ${t.sub}`}>카테고리</p>
+                    <div className="flex flex-wrap gap-2">
+                      {categories.map((cat) => (
+                        <button key={cat.id} type="button" onClick={() => setEditingEvent({...editingEvent, categoryName: cat.name})} className={`px-4 py-2 rounded-xl text-[13px] font-bold transition-all border ${editingEvent.categoryName === cat.name ? 'text-white border-transparent shadow-md' : `${t.text}${t.border}`}`} style={{ backgroundColor: editingEvent.categoryName === cat.name ? cat.color : 'transparent' }}>
+                          {cat.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button type="submit" style={{ backgroundColor: pointColor }} className="w-full py-4 mt-2 rounded-2xl font-bold text-white text-lg active:scale-[0.98] transition-transform shadow-lg">수정 완료</button>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
       </div>
     </main>
   );
