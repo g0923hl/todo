@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { format, addMonths, subMonths, addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, isSameMonth, isSameDay } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight, LogOut, Type, UserRound, Camera } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Settings2, Check, Trash2, ArrowUp, ArrowDown, ChevronDown, CalendarDays, ArrowRight, LogOut, Type, UserRound, Camera, Lock, Unlock } from 'lucide-react';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -55,13 +55,16 @@ export default function Home() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<any>(null);
   
-  const [categories, setCategories] = useState([{ id: 1, name: '기본', color: '#60A5FA' }]);
+  // 🔥 카테고리 속성에 isSecret 추가
+  const [categories, setCategories] = useState([{ id: 1, name: '기본', color: '#60A5FA', isSecret: false }]);
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState('#FF9999');
+  const [newCatIsSecret, setNewCatIsSecret] = useState(false); // 새 카테고리 비밀 설정 여부
   const [collapsedCats, setCollapsedCats] = useState<number[]>([]);
 
   const [inputTitle, setInputTitle] = useState('');
   const [selectedCategoryName, setSelectedCategoryName] = useState('');
+  const [isEventSecret, setIsEventSecret] = useState(false); // 🔥 새 일정 비밀 설정 여부
   const [events, setEvents] = useState<any[]>([]);
 
   useEffect(() => {
@@ -108,7 +111,6 @@ export default function Home() {
     }
   };
 
-  // 🔥 로그아웃 시 메모리 찌꺼기를 완벽히 날리도록 새로고침 추가!
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.reload(); 
@@ -125,13 +127,14 @@ export default function Home() {
         setMyAvatar(data.avatar_url || '');
       }
       if (data.categories && data.categories.length > 0) {
-        setCategories(data.categories);
-        setSelectedCategoryName(data.categories[0].name);
+        // 과거 데이터 호환성 (isSecret 없는 경우 false로 처리)
+        const updatedCats = data.categories.map((c: any) => ({ ...c, isSecret: c.isSecret || false }));
+        setCategories(updatedCats);
+        setSelectedCategoryName(updatedCats[0].name);
       }
     } else if (uid === user?.id) {
-      // 🔥 이전 계정의 카테고리가 섞이지 않도록 완벽하게 분리 (초기화)
       const defaultNick = user.email?.split('@')[0] || '유저';
-      const defaultCats = [{ id: 1, name: '기본', color: '#60A5FA' }];
+      const defaultCats = [{ id: 1, name: '기본', color: '#60A5FA', isSecret: false }];
       await supabase.from('todomate_settings').insert([{ user_id: uid, app_mode: 'light', point_color: '#007AFF', font_size: 'md', nickname: defaultNick, avatar_url: '', categories: defaultCats }]);
       
       setAppMode('light'); setPointColor('#007AFF'); setFontSize('md');
@@ -176,8 +179,8 @@ export default function Home() {
   async function fetchTodosFor(uid: string) {
     const { data } = await supabase.from('todomate_todos').select('*').eq('user_id', uid).order('id', { ascending: true });
     if (data) {
-      // 🔥 날짜가 하루씩 밀리거나 사라지는 버그 완벽 수정 (T00:00:00 추가)
-      setEvents(data.map(d => ({ id: d.id, date: d.target_date ? new Date(d.target_date + 'T00:00:00') : new Date(), title: d.content, categoryName: d.category, isDone: d.is_completed })));
+      // is_secret 상태를 가져와서 UI에 반영
+      setEvents(data.map(d => ({ id: d.id, date: d.target_date ? new Date(d.target_date + 'T00:00:00') : new Date(), title: d.content, categoryName: d.category, isDone: d.is_completed, isSecret: d.is_secret })));
     } else {
       setEvents([]);
     }
@@ -187,9 +190,9 @@ export default function Home() {
     e.preventDefault();
     if (!inputTitle.trim() || !selectedCategoryName) return;
     
-    // 🔥 일정이 DB에 안 들어가고 튕기는지 추적하는 에러 알림 추가
+    // 🔥 데이터베이스에 is_secret 상태까지 포함해서 전송
     const { error } = await supabase.from('todomate_todos').insert([{ 
-      user_id: user.id, content: inputTitle, is_completed: false, category: selectedCategoryName, target_date: format(selectedDate, 'yyyy-MM-dd') 
+      user_id: user.id, content: inputTitle, is_completed: false, category: selectedCategoryName, target_date: format(selectedDate, 'yyyy-MM-dd'), is_secret: isEventSecret 
     }]);
     
     if (error) {
@@ -197,7 +200,7 @@ export default function Home() {
       return;
     }
 
-    setInputTitle(''); setIsAddModalOpen(false); fetchTodosFor(user.id);
+    setInputTitle(''); setIsEventSecret(false); setIsAddModalOpen(false); fetchTodosFor(user.id);
   };
 
   const toggleEvent = async (id: number, currentStatus: boolean) => {
@@ -220,7 +223,7 @@ export default function Home() {
   const updateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent.title.trim()) return;
-    await supabase.from('todomate_todos').update({ content: editingEvent.title, category: editingEvent.categoryName, target_date: format(editingEvent.date, 'yyyy-MM-dd') }).eq('id', editingEvent.id);
+    await supabase.from('todomate_todos').update({ content: editingEvent.title, category: editingEvent.categoryName, target_date: format(editingEvent.date, 'yyyy-MM-dd'), is_secret: editingEvent.isSecret }).eq('id', editingEvent.id);
     setEditingEvent(null); fetchTodosFor(user.id);
   };
 
@@ -231,7 +234,11 @@ export default function Home() {
     setCategories(newCats);
   };
   const deleteCategory = (id: number) => setCategories(categories.filter(c => c.id !== id));
-  const addCategory = () => { if (newCatName.trim()) { setCategories([...categories, { id: Date.now(), name: newCatName, color: newCatColor }]); setNewCatName(''); } };
+  
+  // 카테고리 비밀 여부 토글 함수
+  const toggleCategorySecret = (id: number) => setCategories(categories.map(c => c.id === id ? { ...c, isSecret: !c.isSecret } : c));
+  
+  const addCategory = () => { if (newCatName.trim()) { setCategories([...categories, { id: Date.now(), name: newCatName, color: newCatColor, isSecret: newCatIsSecret }]); setNewCatName(''); setNewCatIsSecret(false); } };
   const updateCategoryColor = (id: number, color: string) => setCategories(categories.map(c => c.id === id ? { ...c, color } : c));
   const toggleCollapse = (name: string) => setCollapsedCats(prev => prev.includes(name as any) ? prev.filter(n => n !== name as any) : [...prev, name as any]);
 
@@ -243,6 +250,10 @@ export default function Home() {
   const t = THEMES[appMode];
   const fs = FONT_SIZES[fontSize];
   const isMyProfile = viewingUserId === user?.id;
+
+  // 🔥 남의 프로필을 볼 때는 '비밀 카테고리'와 '비밀 일정'을 아예 필터링해서 숨김 처리
+  const visibleCategories = isMyProfile ? categories : categories.filter(c => !c.isSecret);
+  const visibleEvents = isMyProfile ? events : events.filter(e => !e.isSecret);
 
   if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>;
 
@@ -301,7 +312,9 @@ export default function Home() {
                 const isSelected = isSameDay(date, selectedDate);
                 const isToday = isSameDay(date, new Date());
                 const isCurrentMonth = isSameMonth(date, currentDate);
-                const dayEvents = events.filter(e => isSameDay(e.date, date));
+                
+                // 달력 점 표시도 비밀 일정을 숨긴 채로 렌더링
+                const dayEvents = visibleEvents.filter(e => isSameDay(e.date, date));
                 const holiday = getHoliday(date);
                 const isRedDay = holiday || date.getDay() === 0;
 
@@ -315,7 +328,7 @@ export default function Home() {
                     {holiday && <div className="absolute -top-6 bg-black/70 text-white text-[10px] px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">{holiday}</div>}
                     <div className="flex gap-0.5 mt-0.5 absolute bottom-0">
                       {dayEvents.slice(0, 3).map((ev, idx) => {
-                        const cat = categories.find(c => c.name === ev.categoryName);
+                        const cat = visibleCategories.find(c => c.name === ev.categoryName);
                         return <div key={idx} className="w-[5px] h-[5px] rounded-full" style={{ backgroundColor: cat?.color || '#ccc' }} />
                       })}
                     </div>
@@ -361,8 +374,10 @@ export default function Home() {
             </h2>
             
             <div className="space-y-6">
-              {categories.map((cat) => {
-                const dayEvents = events.filter(e => isSameDay(e.date, selectedDate) && e.categoryName === cat.name);
+              {/* 보이는 카테고리만 매핑 */}
+              {visibleCategories.map((cat) => {
+                // 보이는 일정 중에서 이 카테고리에 속한 것만 필터링
+                const dayEvents = visibleEvents.filter(e => isSameDay(e.date, selectedDate) && e.categoryName === cat.name);
                 const sortedEvents = [...dayEvents].sort((a, b) => Number(a.isDone) - Number(b.isDone));
                 const isCollapsed = collapsedCats.includes(cat.name as any);
 
@@ -373,6 +388,7 @@ export default function Home() {
                     <div className="flex items-center gap-2 mb-2 cursor-pointer select-none w-max" onClick={() => toggleCollapse(cat.name)}>
                       <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold text-white flex items-center gap-1 transition-opacity shadow-sm ${isCollapsed ? 'opacity-50' : 'opacity-100'}`} style={{ backgroundColor: cat.color }}>
                         {cat.name}
+                        {cat.isSecret && <Lock size={10} className="ml-0.5 opacity-80" />}
                         <ChevronDown size={14} className={`transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
                       </div>
                       <span className={`text-xs font-semibold ${t.sub}`}>{dayEvents.length}</span>
@@ -386,7 +402,11 @@ export default function Home() {
                               <div onClick={() => toggleEvent(ev.id, ev.isDone)} className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-colors shrink-0 ${isMyProfile ? 'cursor-pointer' : 'cursor-default'}`} style={{ backgroundColor: ev.isDone ? cat.color : 'transparent', borderColor: ev.isDone ? cat.color : '#D1D5DB' }}>
                                 {ev.isDone && <Check size={12} className="text-white" />}
                               </div>
-                              <span onClick={() => isMyProfile && setEditingEvent(ev)} className={`${fs} font-medium flex-1 ${isMyProfile ? 'cursor-pointer hover:opacity-70' : 'cursor-default'} ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
+                              <div onClick={() => isMyProfile && setEditingEvent(ev)} className={`flex-1 flex items-center gap-2 ${isMyProfile ? 'cursor-pointer hover:opacity-70' : 'cursor-default'}`}>
+                                <span className={`${fs} font-medium ${ev.isDone ? `${t.sub} line-through` : t.text}`}>{ev.title}</span>
+                                {/* 비밀 일정 아이콘 */}
+                                {ev.isSecret && <Lock size={14} className="text-gray-400" title="나만 보기" />}
+                              </div>
                               
                               {isMyProfile && (
                                 <>
@@ -475,31 +495,45 @@ export default function Home() {
                   </div>
 
                   <div className="space-y-3">
-                    <h3 className={`text-sm font-bold ml-1 ${t.sub}`}>카테고리 관리</h3>
+                    <h3 className={`text-sm font-bold ml-1 flex items-center justify-between ${t.sub}`}>
+                      <span>카테고리 관리</span>
+                      <span className="text-[10px] font-normal flex items-center gap-1"><Lock size={10}/> 아이콘을 눌러 나만 보기</span>
+                    </h3>
                     <div className={`p-4 rounded-2xl ${t.card} border ${t.border} space-y-3`}>
                       {categories.map((cat, i) => (
                         <div key={cat.id} className={`flex items-center justify-between pb-3 border-b ${t.border} last:border-0 last:pb-0`}>
                           <div className="flex items-center gap-3">
                             <div className="relative w-5 h-5 rounded-full shadow-sm border border-gray-100 overflow-hidden shrink-0"><input type="color" value={cat.color} onChange={(e) => updateCategoryColor(cat.id, e.target.value)} className="absolute -top-2 -left-2 w-10 h-10 cursor-pointer" /></div>
-                            <span className={`font-medium ${t.text}`}>{cat.name}</span>
+                            <span className={`font-medium flex items-center gap-1 ${t.text}`}>
+                              {cat.name}
+                            </span>
                           </div>
                           <div className="flex items-center gap-1">
+                            {/* 🔥 카테고리 비밀 여부 토글 버튼 */}
+                            <button onClick={() => toggleCategorySecret(cat.id)} className={`p-1.5 rounded-md transition-colors ${cat.isSecret ? 'text-blue-500 bg-blue-50' : `text-gray-300 hover:${t.page}`}`} title="나만 보기">
+                              {cat.isSecret ? <Lock size={16} /> : <Unlock size={16} />}
+                            </button>
+                            <div className="w-px h-4 bg-gray-200 mx-1"></div>
                             <button onClick={() => moveCategory(i, 'up')} className={`p-1.5 rounded-md ${t.sub} hover:${t.page}`}><ArrowUp size={16}/></button>
                             <button onClick={() => moveCategory(i, 'down')} className={`p-1.5 rounded-md ${t.sub} hover:${t.page}`}><ArrowDown size={16}/></button>
                             <button onClick={() => deleteCategory(cat.id)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-md ml-1"><Trash2 size={16}/></button>
                           </div>
                         </div>
                       ))}
-                      <div className={`flex gap-2 pt-3 mt-3 border-t ${t.border}`}>
+                      
+                      {/* 새 카테고리 추가 영역 */}
+                      <div className={`flex items-center gap-2 pt-3 mt-3 border-t ${t.border}`}>
                         <div className="relative w-8 h-8 rounded-lg overflow-hidden border border-gray-200 shrink-0"><input type="color" value={newCatColor} onChange={(e) => setNewCatColor(e.target.value)} className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer" /></div>
-                        <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="새 카테고리 이름" className={`flex-1 bg-transparent outline-none text-[15px] ${t.text} placeholder:${t.sub}`} />
-                        <button onClick={addCategory} className="px-4 py-1.5 rounded-lg text-sm font-bold text-white shadow-sm" style={{ backgroundColor: pointColor }}>추가</button>
+                        <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="새 카테고리 이름" className={`flex-1 min-w-0 bg-transparent outline-none text-[15px] ${t.text} placeholder:${t.sub}`} />
+                        <button onClick={() => setNewCatIsSecret(!newCatIsSecret)} className={`p-2 rounded-lg transition-colors ${newCatIsSecret ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
+                          {newCatIsSecret ? <Lock size={16} /> : <Unlock size={16} />}
+                        </button>
+                        <button onClick={addCategory} className="px-4 py-2 rounded-lg text-sm font-bold text-white shadow-sm whitespace-nowrap" style={{ backgroundColor: pointColor }}>추가</button>
                       </div>
                     </div>
                   </div>
                   
                   <div className="pt-4">
-                    {/* 🔥 바뀐 로그아웃 버튼 (새로고침 탑재!) */}
                     <button onClick={handleLogout} className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-red-500 bg-red-50 hover:bg-red-100 font-bold transition-colors">
                       <LogOut size={18} /> 로그아웃
                     </button>
@@ -510,10 +544,85 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* (일정 추가 및 수정 모달 생략 없이 위 코드 안에 모두 포함됨) */}
-        
+        {/* ================= 일정 추가 모달 ================= */}
+        <AnimatePresence>
+          {isAddModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAddModalOpen(false)} className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" />
+              <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[440px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl flex flex-col pointer-events-auto relative z-10`}>
+                <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6 md:hidden" />
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className={`text-xl font-bold ${t.text}`}>새로운 일정</h2>
+                  <button onClick={() => setIsAddModalOpen(false)} className={`p-1.5 rounded-full ${t.card} border ${t.border} ${t.sub}`}><X size={20} /></button>
+                </div>
+                <form onSubmit={addEvent} className="flex flex-col gap-6">
+                  <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm flex items-center gap-3`}>
+                    <input type="text" autoFocus value={inputTitle} onChange={(e) => setInputTitle(e.target.value)} placeholder="일정 제목을 입력하세요" className={`flex-1 text-lg bg-transparent outline-none ${t.text} placeholder:${t.sub}`} />
+                    {/* 🔥 개별 일정 비밀 토글 버튼 */}
+                    <button type="button" onClick={() => setIsEventSecret(!isEventSecret)} className={`p-2 rounded-xl transition-colors ${isEventSecret ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`} title="나만 보기">
+                      {isEventSecret ? <Lock size={20} /> : <Unlock size={20} />}
+                    </button>
+                  </div>
+                  <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm`}>
+                    <p className={`text-xs font-bold mb-3 ml-1 ${t.sub}`}>어느 카테고리에 추가할까요?</p>
+                    <div className="flex flex-wrap gap-2">
+                      {categories.map((cat) => (
+                        <button key={cat.id} type="button" onClick={() => setSelectedCategoryName(cat.name)} className={`px-4 py-2 rounded-xl text-[13px] font-bold transition-all border flex items-center gap-1 ${selectedCategoryName === cat.name ? 'text-white border-transparent shadow-md' : `${t.text}${t.border}`}`} style={{ backgroundColor: selectedCategoryName === cat.name ? cat.color : 'transparent' }}>
+                          {cat.name} {cat.isSecret && <Lock size={12} className={selectedCategoryName === cat.name ? 'text-white' : 'text-gray-400'}/>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button type="submit" style={{ backgroundColor: pointColor }} className="w-full py-4 rounded-2xl font-bold text-white text-lg active:scale-[0.98] transition-transform shadow-lg">추가하기</button>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* ================= 일정 수정 모달 ================= */}
+        <AnimatePresence>
+          {editingEvent && (
+            <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6 pointer-events-none">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEditingEvent(null)} className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" />
+              <motion.div initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className={`w-full md:w-[440px] ${t.bg} rounded-t-[32px] md:rounded-[32px] p-6 pt-4 shadow-2xl flex flex-col pointer-events-auto relative z-10`}>
+                <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-6 md:hidden" />
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className={`text-xl font-bold ${t.text}`}>일정 수정</h2>
+                  <button onClick={() => setEditingEvent(null)} className={`p-1.5 rounded-full ${t.card} border ${t.border} ${t.sub}`}><X size={20} /></button>
+                </div>
+                <form onSubmit={updateEvent} className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <input type="date" value={format(editingEvent.date, 'yyyy-MM-dd')} onChange={(e) => setEditingEvent({...editingEvent, date: new Date(e.target.value)})} className={`px-4 py-2.5 rounded-xl border ${t.border} ${t.bg} ${t.text} font-medium outline-none shrink-0`} />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, new Date()); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors`}>오늘 하기</button>
+                      <button type="button" onClick={() => { quickMoveEvent(editingEvent.id, addDays(new Date(), 1)); setEditingEvent(null); }} className={`px-3 py-2 rounded-xl text-[13px] font-bold bg-orange-50 text-orange-500 hover:bg-orange-100 transition-colors`}>미루기</button>
+                    </div>
+                  </div>
+                  <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm mt-2 flex items-center gap-3`}>
+                    <input type="text" autoFocus value={editingEvent.title} onChange={(e) => setEditingEvent({...editingEvent, title: e.target.value})} placeholder="일정 제목" className={`flex-1 text-lg bg-transparent outline-none ${t.text} placeholder:${t.sub}`} />
+                    <button type="button" onClick={() => setEditingEvent({...editingEvent, isSecret: !editingEvent.isSecret})} className={`p-2 rounded-xl transition-colors ${editingEvent.isSecret ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`} title="나만 보기">
+                      {editingEvent.isSecret ? <Lock size={20} /> : <Unlock size={20} />}
+                    </button>
+                  </div>
+                  <div className={`${t.card} border ${t.border} rounded-2xl p-4 shadow-sm`}>
+                    <p className={`text-xs font-bold mb-3 ml-1 ${t.sub}`}>카테고리</p>
+                    <div className="flex flex-wrap gap-2">
+                      {categories.map((cat) => (
+                        <button key={cat.id} type="button" onClick={() => setEditingEvent({...editingEvent, categoryName: cat.name})} className={`px-4 py-2 rounded-xl text-[13px] font-bold transition-all border flex items-center gap-1 ${editingEvent.categoryName === cat.name ? 'text-white border-transparent shadow-md' : `${t.text}${t.border}`}`} style={{ backgroundColor: editingEvent.categoryName === cat.name ? cat.color : 'transparent' }}>
+                          {cat.name} {cat.isSecret && <Lock size={12} className={editingEvent.categoryName === cat.name ? 'text-white' : 'text-gray-400'}/>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button type="submit" style={{ backgroundColor: pointColor }} className="w-full py-4 mt-2 rounded-2xl font-bold text-white text-lg active:scale-[0.98] transition-transform shadow-lg">수정 완료</button>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
       </div>
     </main>
   );
 }
-
